@@ -3,44 +3,65 @@ import { handle, jsonBody, parse } from "@/lib/http";
 import { getRepo } from "@/lib/repo";
 import { getActor } from "@/lib/session";
 import {
-  adminAddLocation,
+  adminSetLocationPosition,
+  adminVerifyLocation,
   requireRole,
 } from "@/lib/service";
-import { addLocationSchema } from "@/lib/schemas";
+import {
+  setLocationPositionSchema,
+  verifyLocationSchema,
+} from "@/lib/schemas";
+import { ApiError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// GET /api/v1/admin/locations
-// List campus landmarks for the admin dashboard.
-export const GET = handle(async (req) => {
+// POST /api/v1/admin/locations/:id/position
+// Update a campus landmark's coordinates.
+export const POST = handle(async (req, { params }) => {
   const actor = await getActor(req);
   requireRole(actor, "admin");
 
-  const repo = await getRepo();
-  const locations = await repo.listLocations(true);
-
-  return { locations };
-});
-
-// POST /api/v1/admin/locations
-// Create a campus landmark.
-export const POST = handle(async (req) => {
-  const actor = await getActor(req);
-  requireRole(actor, "admin");
-
-  const input = parse(
-    addLocationSchema,
-    await jsonBody(req),
-  );
-
+  const id = params.id ?? "";
+  const action = params.action;
   const repo = await getRepo();
 
-  const location = await adminAddLocation(
-    repo,
-    actor,
-    input,
-  );
+  if (action === "position") {
+    const input = parse(
+      setLocationPositionSchema,
+      await jsonBody(req),
+    );
 
-  return { location };
+    const normalizedInput = {
+      ...input,
+      confirmReplaceVerified:
+        input.confirmReplaceVerified ?? false,
+    };
+
+    const location = await adminSetLocationPosition(
+      repo,
+      actor,
+      id,
+      normalizedInput,
+    );
+
+    return { location };
+  }
+
+  if (action === "verify") {
+    parse(
+      verifyLocationSchema,
+      await jsonBody(req),
+    );
+
+    const location = await adminVerifyLocation(
+      repo,
+      actor,
+      id,
+    );
+
+    return { location };
+  }
+
+  throw new ApiError(404, "NOT_FOUND", "Not found.");
 });
