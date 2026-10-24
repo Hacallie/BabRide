@@ -29,11 +29,17 @@ export const POST = handle(async (req, { params }) => {
       await jsonBody(req),
     );
 
+    const normalizedInput = {
+      ...input,
+      confirmReplaceVerified:
+        input.confirmReplaceVerified ?? false,
+    };
+
     const location = await adminSetLocationPosition(
       await getRepo(),
       actor,
       id,
-      input,
+      normalizedInput,
     );
 
     return { location };

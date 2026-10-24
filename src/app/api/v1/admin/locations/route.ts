@@ -32,10 +32,17 @@ export const POST = handle(async (req) => {
     await jsonBody(req),
   );
 
+  const normalizedInput = {
+    ...input,
+    description: input.description ?? "",
+    pickupAllowed: input.pickupAllowed ?? true,
+    destinationAllowed: input.destinationAllowed ?? true,
+  };
+
   const location = await adminAddLocation(
     await getRepo(),
     actor,
-    input,
+    normalizedInput,
   );
 
   return { location };

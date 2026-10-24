@@ -13,6 +13,7 @@ export function safeNext(raw: string | null | undefined): string | null {
   const p = raw; // not trimmed: stray whitespace or control characters mean "reject"
   if (!p.startsWith("/") || p.startsWith("//") || p.includes("\\") || /[\u0000-\u001f]/.test(p)) return null;
   const path = p.split(/[?#]/)[0];
+if (path === undefined) return null;
   return ALLOWED_NEXT.includes(path) ? path : null;
 }
 
