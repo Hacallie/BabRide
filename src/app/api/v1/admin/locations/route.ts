@@ -9,6 +9,7 @@ import {
 import { addLocationSchema } from "@/lib/schemas";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 // GET /api/v1/admin/locations
 // List campus landmarks for the admin dashboard.
@@ -17,10 +18,9 @@ export const GET = handle(async (req) => {
   requireRole(actor, "admin");
 
   const repo = await getRepo();
+  const locations = await repo.listLocations(true);
 
-  return {
-    locations: await repo.listLocations(true),
-  };
+  return { locations };
 });
 
 // POST /api/v1/admin/locations
@@ -34,8 +34,10 @@ export const POST = handle(async (req) => {
     await jsonBody(req),
   );
 
+  const repo = await getRepo();
+
   const location = await adminAddLocation(
-    await getRepo(),
+    repo,
     actor,
     input,
   );
