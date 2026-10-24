@@ -3,47 +3,63 @@ import { handle, jsonBody, parse } from "@/lib/http";
 import { getRepo } from "@/lib/repo";
 import { getActor } from "@/lib/session";
 import {
-  adminAddLocation,
+  adminSetLocationPosition,
+  adminVerifyLocation,
   requireRole,
 } from "@/lib/service";
-import { addLocationSchema } from "@/lib/schemas";
+import {
+  setLocationPositionSchema,
+  verifyLocationSchema,
+} from "@/lib/schemas";
+import { ApiError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/v1/admin/locations
-export const GET = handle(async (req) => {
+// POST /api/v1/admin/locations/:id/position
+// POST /api/v1/admin/locations/:id/verify
+export const POST = handle(async (req, { params }) => {
   const actor = await getActor(req);
   requireRole(actor, "admin");
 
+  const id = params.id ?? "";
   const repo = await getRepo();
 
-  return {
-    locations: await repo.listLocations(true),
-  };
-});
+  if (params.action === "position") {
+    const input = parse(
+      setLocationPositionSchema,
+      await jsonBody(req),
+    );
 
-// POST /api/v1/admin/locations
-export const POST = handle(async (req) => {
-  const actor = await getActor(req);
-  requireRole(actor, "admin");
+    const normalizedInput = {
+      ...input,
+      confirmReplaceVerified:
+        input.confirmReplaceVerified ?? false,
+    };
 
-  const input = parse(
-    addLocationSchema,
-    await jsonBody(req),
-  );
+    const location = await adminSetLocationPosition(
+      repo,
+      actor,
+      id,
+      normalizedInput,
+    );
 
-  const normalizedInput = {
-    ...input,
-    description: input.description ?? "",
-    pickupAllowed: input.pickupAllowed ?? true,
-    destinationAllowed: input.destinationAllowed ?? true,
-  };
+    return { location };
+  }
 
-  const location = await adminAddLocation(
-    await getRepo(),
-    actor,
-    normalizedInput,
-  );
+  if (params.action === "verify") {
+    parse(
+      verifyLocationSchema,
+      await jsonBody(req),
+    );
 
-  return { location };
+    const location = await adminVerifyLocation(
+      repo,
+      actor,
+      id,
+    );
+
+    return { location };
+  }
+
+  throw new ApiError(404, "NOT_FOUND", "Not found.");
 });
