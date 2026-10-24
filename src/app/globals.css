@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body { @apply bg-navy-50 font-sans text-navy-950 antialiased; overflow-x: hidden; }
+:focus-visible { @apply outline outline-2 outline-offset-2 outline-royal; }
+.on-dark :focus-visible { @apply outline-accent; }
+
+/* Liquid glass. Solid fallback first; translucency only where backdrop-filter works. */
+.glass { background: rgba(10, 36, 84, 0.94); border: 1px solid rgba(255, 255, 255, 0.16); box-shadow: 0 24px 60px -20px rgba(3, 10, 30, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.18); }
+.glass-nav { background: rgba(7, 26, 61, 0.97); border-bottom: 1px solid rgba(255, 255, 255, 0.12); }
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .glass { background: linear-gradient(160deg, rgba(255,255,255,0.14), rgba(255,255,255,0.05) 45%, rgba(36,92,226,0.14)); -webkit-backdrop-filter: blur(18px) saturate(140%); backdrop-filter: blur(18px) saturate(140%); }
+  .glass-nav { background: rgba(7, 26, 61, 0.72); -webkit-backdrop-filter: blur(14px) saturate(140%); backdrop-filter: blur(14px) saturate(140%); }
+}
+
+.hero-bg {
+  background:
+    radial-gradient(60rem 30rem at 85% -10%, rgba(36, 92, 226, 0.55), transparent 60%),
+    radial-gradient(40rem 24rem at 0% 100%, rgba(36, 92, 226, 0.25), transparent 60%),
+    linear-gradient(180deg, #071A3D 0%, #0A2454 100%);
+}
+
+@keyframes route-dash { to { stroke-dashoffset: -48; } }
+.route-line { stroke-dasharray: 6 10; animation: route-dash 3s linear infinite; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise .25s ease-out both; }
+@keyframes shimmer { 50% { opacity: .5; } }
+.skeleton { animation: shimmer 1.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}

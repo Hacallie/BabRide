@@ -1,0 +1,14 @@
+<!-- Paste into Supabase Dashboard > Authentication > Emails > Templates.
+     Use the SAME body for BOTH "Magic Link" and "Confirm signup" (new users receive "Confirm signup").
+     Suggested subject: Your Bab Ride sign-in code
+     {{ .Token }} is the one-time code Supabase generates and later verifies. {{ .ConfirmationURL }} is the one-time link. -->
+<div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#071A3D">
+  <h2 style="margin:0 0 8px;color:#245CE2">Bab Ride</h2>
+  <p style="margin:0 0 16px">Use this code to sign in:</p>
+  <p style="margin:0 0 20px;font-size:32px;font-weight:700;letter-spacing:6px;background:#F5F8FF;border-radius:12px;padding:16px;text-align:center">{{ .Token }}</p>
+  <p style="margin:0 0 16px;color:#17356F">The code works once and expires soon. Enter it on the Bab Ride sign-in page.</p>
+  <p style="margin:0 0 16px">Or use the link instead (open it in the same browser where you asked for it):<br>
+    <a href="{{ .ConfirmationURL }}" style="color:#245CE2">Sign in to Bab Ride</a></p>
+  <hr style="border:none;border-top:1px solid #E3EBFA;margin:24px 0">
+  <p style="margin:0;font-size:12px;color:#17356F">If you didn't ask for this, you can ignore this email. Nobody can sign in without the code. Bab Ride is not affiliated with or endorsed by Babcock University.</p>
+</div>

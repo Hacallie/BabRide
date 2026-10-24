@@ -1,0 +1,2 @@
+export interface Landmark { id: string; name: string; description?: string; verified: boolean; pickupAllowed: boolean; destinationAllowed: boolean }
+export const SELECT_DESTINATION_EVENT = "babride:select-destination";
