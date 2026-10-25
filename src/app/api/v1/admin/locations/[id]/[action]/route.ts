@@ -14,16 +14,19 @@ import {
 import { ApiError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 // POST /api/v1/admin/locations/:id/position
-// POST /api/v1/admin/locations/:id/verify
+// Update a campus landmark's coordinates.
 export const POST = handle(async (req, { params }) => {
   const actor = await getActor(req);
   requireRole(actor, "admin");
 
   const id = params.id ?? "";
+  const action = params.action;
+  const repo = await getRepo();
 
-  if (params.action === "position") {
+  if (action === "position") {
     const input = parse(
       setLocationPositionSchema,
       await jsonBody(req),
@@ -36,7 +39,7 @@ export const POST = handle(async (req, { params }) => {
     };
 
     const location = await adminSetLocationPosition(
-      await getRepo(),
+      repo,
       actor,
       id,
       normalizedInput,
@@ -45,14 +48,14 @@ export const POST = handle(async (req, { params }) => {
     return { location };
   }
 
-  if (params.action === "verify") {
+  if (action === "verify") {
     parse(
       verifyLocationSchema,
       await jsonBody(req),
     );
 
     const location = await adminVerifyLocation(
-      await getRepo(),
+      repo,
       actor,
       id,
     );
