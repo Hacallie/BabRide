@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { ZodType } from "zod";
+import type { ZodType, ZodTypeDef } from "zod";
 import { ApiError } from "@/lib/errors";
 
 export interface Ctx { params: Record<string, string> }
@@ -17,7 +17,8 @@ export function handle(fn: (req: Request, ctx: Ctx) => Promise<unknown>, success
   };
 }
 
-export function parse<T>(schema: ZodType<T>, data: unknown): T {
+// Input is `unknown` on purpose: schemas that coerce or preprocess (query strings) accept more than they output.
+export function parse<T>(schema: ZodType<T, ZodTypeDef, unknown>, data: unknown): T {
   const r = schema.safeParse(data);
   if (!r.success) throw new ApiError(400, "INVALID_INPUT", r.error.issues[0]?.message ?? "Invalid request.");
   return r.data;

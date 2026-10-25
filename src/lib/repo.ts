@@ -6,14 +6,18 @@ import { ApiError } from "@/lib/errors";
 
 export interface NewRide {
   studentId: string; idempotencyKey: string;
-  pickup: { latitude: number; longitude: number; locationId: string | null };
+  pickup: { latitude: number | null; longitude: number | null; locationId: string | null };
+  passengerCount: number;
   destinationLocationId: string; paymentMethod: "cash" | "electronic"; fareKobo: number;
 }
 
+/** Position is OPTIONAL: a landmark can be created by name alone and located later ("Not located yet"). */
 export interface NewLoc {
-  name: string; description: string; latitude: number; longitude: number;
-  source: Exclude<LocSource, "legacy">; pickupAllowed: boolean; destinationAllowed: boolean;
+  name: string; description: string; latitude?: number; longitude?: number;
+  source?: Exclude<LocSource, "legacy">; pickupAllowed: boolean; destinationAllowed: boolean;
 }
+/** Details only. Coordinates and verification are never touched here; use setLocationPosition / verifyLocation. */
+export interface LocationDetailsPatch { name?: string; description?: string; pickupAllowed?: boolean; destinationAllowed?: boolean; active?: boolean }
 
 export interface Repo {
   kind: "supabase" | "test"; // "test" is only used by the in-memory helper under tests/
@@ -22,6 +26,7 @@ export interface Repo {
   addLocation(l: NewLoc, adminId: string): Promise<Loc>;
   /** Moves a landmark. Always clears "ground verified" (the old verification no longer applies to the new point). */
   setLocationPosition(id: string, p: { latitude: number; longitude: number; source: Exclude<LocSource, "legacy"> }, adminId: string): Promise<Loc>;
+  updateLocationDetails(id: string, patch: LocationDetailsPatch, adminId: string): Promise<Loc>;
   /** Marks a located landmark ground verified. Fails with 409 if it is not located or already verified. */
   verifyLocation(id: string, adminId: string): Promise<Loc>;
   findRideByKey(studentId: string, key: string): Promise<Ride | null>;
@@ -43,6 +48,8 @@ export interface Repo {
   setOnline(id: string, online: boolean): Promise<void>;
   listRiders(): Promise<RiderInfo[]>;
   setRiderApproval(id: string, status: RiderApproval, adminId: string): Promise<RiderInfo>;
+  /** Records an administrator-confirmed seat capacity for the rider's vehicle. */
+  setVehicleCapacity(riderId: string, capacity: number, adminId: string): Promise<RiderInfo>;
 }
 
 export async function getRepo(): Promise<Repo> {

@@ -5,7 +5,7 @@
 import { ApiError } from "@/lib/errors";
 
 export interface GeoCandidate { label: string; latitude: number; longitude: number }
-export type GeocoderConfig = { provider: "none" } | { provider: "nominatim"; baseUrl: string; contact: string };
+export type GeocoderConfig = { provider: "none" } | { provider: "nominatim"; baseUrl: string; contact: string; viewbox: string | null; context: string };
 type Env = Record<string, string | undefined>;
 
 export function geocoderConfig(env: Env = process.env): GeocoderConfig {
@@ -14,7 +14,17 @@ export function geocoderConfig(env: Env = process.env): GeocoderConfig {
   if (!contact) return { provider: "none" }; // refuse to run without the contact the provider's policy requires
   const base = (env.GEOCODER_BASE_URL ?? "https://nominatim.openstreetmap.org").trim().replace(/\/+$/, "");
   try { if (!/^https:$/.test(new URL(base).protocol)) return { provider: "none" }; } catch { return { provider: "none" }; }
-  return { provider: "nominatim", baseUrl: base, contact };
+  return { provider: "nominatim", baseUrl: base, contact, viewbox: parseViewbox(env.GEOCODER_VIEWBOX), context: (env.GEOCODER_CONTEXT ?? "Babcock University, Ilishan-Remo").trim().slice(0, 80) };
+}
+
+/** Optional owner-supplied search box "lon1,lat1,lon2,lat2" (a rough campus rectangle). Never guessed by the app. */
+export function parseViewbox(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const n = raw.split(",").map((x) => Number(x.trim()));
+  if (n.length !== 4 || n.some((x) => !Number.isFinite(x))) return null;
+  const [x1, y1, x2, y2] = n as [number, number, number, number];
+  if (Math.abs(x1) > 180 || Math.abs(x2) > 180 || Math.abs(y1) > 90 || Math.abs(y2) > 90 || x1 === x2 || y1 === y2) return null;
+  return n.join(",");
 }
 
 /** Defensive parse: keeps only well-formed numeric results and caps the list. */
@@ -31,17 +41,36 @@ export function parseNominatim(json: unknown): GeoCandidate[] {
   return out;
 }
 
+async function queryProvider(cfg: Extract<GeocoderConfig, { provider: "nominatim" }>, q: string, bounded: boolean, fetchImpl: typeof fetch): Promise<GeoCandidate[]> {
+  const params = new URLSearchParams({ q, format: "jsonv2", limit: "6", countrycodes: "ng" });
+  if (cfg.viewbox) { params.set("viewbox", cfg.viewbox); if (bounded) params.set("bounded", "1"); }
+  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const res = await fetchImpl(`${cfg.baseUrl}/search?${params}`, { signal: ctl.signal, headers: { "User-Agent": `BabRide/1.0 (${cfg.contact})`, Accept: "application/json" }, cache: "no-store" });
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    return parseNominatim(await res.json());
+  } finally { clearTimeout(timer); }
+}
+
+/** Campus-first search: (1) the name with the campus as context, (2) inside the owner's viewbox if set, (3) plain, as a last resort. */
 export async function searchPlaces(q: string, env: Env = process.env, fetchImpl: typeof fetch = fetch): Promise<GeoCandidate[]> {
   const cfg = geocoderConfig(env);
   if (cfg.provider === "none")
     throw new ApiError(503, "GEOCODER_NOT_CONFIGURED", "Place search isn't set up on this server. You can still use your current GPS position.");
-  const url = `${cfg.baseUrl}/search?${new URLSearchParams({ q, format: "jsonv2", limit: "6", countrycodes: "ng" })}`;
-  const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 5000);
   try {
-    const res = await fetchImpl(url, { signal: ctl.signal, headers: { "User-Agent": `BabRide/1.0 (${cfg.contact})`, Accept: "application/json" }, cache: "no-store" });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    return parseNominatim(await res.json());
+    const attempts: [string, boolean][] = [[`${q}, ${cfg.context}`, false]];
+    if (cfg.viewbox) attempts.push([q, true]);
+    attempts.push([q, false]);
+    const seen = new Set<string>(); const out: GeoCandidate[] = [];
+    for (const [query, bounded] of attempts) {
+      for (const c of await queryProvider(cfg, query, bounded, fetchImpl)) {
+        const k = `${c.latitude.toFixed(5)},${c.longitude.toFixed(5)}`;
+        if (!seen.has(k)) { seen.add(k); out.push(c); }
+      }
+      if (out.length >= 3) break; // enough campus-first results; spare the provider
+    }
+    return out.slice(0, 6);
   } catch {
     throw new ApiError(502, "GEOCODER_FAILED", "Place search is unavailable right now. Try again, or use your current GPS position.");
-  } finally { clearTimeout(timer); }
+  }
 }

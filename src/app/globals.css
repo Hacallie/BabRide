@@ -33,3 +33,12 @@ body { @apply bg-navy-50 font-sans text-navy-950 antialiased; overflow-x: hidden
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* Low-end phones: backdrop blur is the most expensive effect here. On small screens (and when the user asks for less
+   transparency) use the solid fallback instead. Placed last so it overrides the @supports rules above. */
+@media (max-width: 640px), (prefers-reduced-transparency: reduce) {
+  .glass { background: rgba(10, 36, 84, 0.94); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .glass-nav { background: rgba(7, 26, 61, 0.97); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+/* Never let a long word or address force sideways scrolling on a 320 px phone. */
+main, section, li, p, dd, dt, label { overflow-wrap: anywhere; }

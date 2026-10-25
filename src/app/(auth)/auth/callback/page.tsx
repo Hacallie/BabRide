@@ -8,7 +8,7 @@ import { browserSupabase } from "@/lib/supabase-browser";
 import type { Me } from "@/components/Gate";
 import { btnAccent, glassPanel } from "@/components/ui";
 
-// Landing page for magic links and Google/Apple sign-in. Exchanges the one-time ?code= for a session,
+// Landing page for Google sign-in and email-confirmation links. Exchanges the one-time ?code= for a session,
 // loads the user's role from OUR server (never from the URL), then opens the right page.
 export default function AuthCallback() {
   const router = useRouter();

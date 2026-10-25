@@ -9,8 +9,8 @@ const links = [
   { href: "/#how", label: "How It Works" },
   { href: "/#campus", label: "Campus Locations" },
   { href: "/rider/join", label: "Become a Rider" },
-  { href: "/login", label: "Student Sign In" },
-  { href: "/rider/login", label: "Rider Sign In" },
+  { href: "/login", label: "Sign in" },
+  { href: "/signup", label: "Create account" },
 ];
 
 export default function SiteHeader() {

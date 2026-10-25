@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AuthPanel from "@/components/auth/AuthPanel";
 import type { Me } from "@/components/Gate";
 import { btnAccent, btnGlass, glassPanel } from "@/components/ui";
@@ -46,8 +46,8 @@ export default function RiderJoin() {
         {st.s === "loading" && <div className={glassPanel} role="status"><p className="text-mist">Loading…</p></div>}
         {st.s === "error" && <div className={glassPanel} role="alert"><h2 className="text-xl font-bold">Unavailable</h2><p className="mt-2 text-mist">{st.msg}</p></div>}
         {st.s === "anon" && (
-          <AuthPanel as="h2" heading="Step 1: your account" next="/rider/join" onSignedIn={load}
-            intro="Sign in, or create an account with your email. You start as a student account; applying does not approve you."
+          <AuthPanel as="h2" initialView="signup" heading="Step 1: your account" next="/rider/join" onSignedIn={load}
+            intro="Create an account (or sign in if you have one). You start as a student account; applying does not approve you."
             footer={<>Already applied? <Link href="/rider/login" className="font-semibold text-white underline underline-offset-2">Rider sign-in</Link> · Just want to book rides? <Link href="/login" className="font-semibold text-white underline underline-offset-2">Student sign-in</Link></>} />
         )}
         {st.s === "ready" && <Onboarding me={st.me} reload={load} />}
@@ -59,14 +59,18 @@ export default function RiderJoin() {
 function Onboarding({ me, reload }: { me: Me; reload: () => Promise<void> }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const sending = useRef(false); // synchronous guard against double taps
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (busy) return;
-    setBusy(true); setErr(null);
-    try { await api("/api/v1/rider/apply", { method: "POST", body: {} }); await reload(); }
-    catch (x) { setErr(x instanceof Error ? x.message : "Could not submit your application."); }
-    finally { setBusy(false); }
+    if (sending.current) return;
+    sending.current = true; setBusy(true); setErr(null);
+    try {
+      // The server answers only after the application row is saved; the request itself times out after 20 s.
+      await api("/api/v1/rider/apply", { method: "POST", body: {} });
+      await reload(); // re-reads the saved status from the server: what we show is what was stored
+    } catch (x) { setErr(x instanceof Error ? x.message : "Could not submit your application."); }
+    finally { sending.current = false; setBusy(false); }
   }
 
   if (me.actor.role === "admin") return (
@@ -97,7 +101,7 @@ function Onboarding({ me, reload }: { me: Me; reload: () => Promise<void> }) {
       <p className="mt-1 text-sm text-mist">Signed in as <b className="text-white">{me.actor.name}</b>.</p>
       <p className="mt-4 text-sm text-mist">We'll send your application to an administrator. You don't need to enter a tricycle number.</p>
       {err && <p role="alert" className="mt-3 rounded-lg bg-red-500/15 p-3 text-sm text-red-100">{err}</p>}
-      <button className={`${btnAccent} mt-5 w-full`} disabled={busy}>{busy ? "Submitting…" : "Submit application"}</button>
+      <button className={`${btnAccent} mt-5 w-full`} disabled={busy} aria-busy={busy}>{busy ? "Submitting…" : err ? "Try again" : "Submit application"}</button>
       <p className="mt-3 text-xs text-mist">Submitting creates a <b className="text-white">pending</b> application. Nothing is approved automatically.</p>
     </form>
   );

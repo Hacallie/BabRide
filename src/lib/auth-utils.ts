@@ -2,8 +2,6 @@ import type { Role } from "@/lib/types";
 
 /** sessionStorage key holding the page to open after sign-in (kept out of the redirect URL on purpose). */
 export const NEXT_KEY = "babride:next";
-export const COOLDOWN_KEY = "babride:otp-until";
-export const OTP_COOLDOWN_SECONDS = 60;
 
 const ALLOWED_NEXT = ["/student", "/rider", "/rider/join", "/admin"];
 
@@ -39,10 +37,15 @@ export function normalizeEmail(raw: string): string | null {
   return e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null;
 }
 
-/** Accepts "123 456" or "123-456". Supabase codes are 6 to 10 digits depending on the project setting. */
-export function normalizeCode(raw: string): string | null {
-  const c = raw.replace(/[\s-]/g, "");
-  return /^\d{6,10}$/.test(c) ? c : null;
+/** Email + password rules shown before we call the provider. (Supabase also enforces its own minimum.) */
+export function passwordProblem(pw: string): string | null {
+  if (pw.length < 8) return "Use at least 8 characters.";
+  if (pw.length > 72) return "Use 72 characters or fewer.";
+  return null;
+}
+export function nameProblem(raw: string): string | null {
+  const n = raw.trim();
+  return n.length < 2 ? "Enter your full name." : n.length > 80 ? "That name is too long." : null;
 }
 
 /** Friendly, non-leaky messages. Never shows raw provider text. */
@@ -51,14 +54,15 @@ export function describeAuthError(err: unknown): string {
   const msg = (e.message ?? "").toLowerCase();
   const code = (e.code ?? "").toLowerCase();
   if (code === "invalid_credentials" || /invalid login credentials/.test(msg)) return "Incorrect email or password.";
-  if (code === "otp_expired" || /expired|invalid.*(token|otp|code)|token.*invalid/.test(msg))
-    return "That code is invalid or has expired. Check it and try again, or request a new one.";
+  if (code === "email_not_confirmed" || /email not confirmed/.test(msg)) return "Please confirm your email first. Check your inbox (and spam) for our message, then sign in.";
+  if (code === "user_already_exists" || /already registered|already exists/.test(msg)) return "An account with this email already exists. Sign in instead.";
+  if (code === "weak_password" || /password.*(weak|short|least)/.test(msg)) return "Choose a stronger password (at least 8 characters).";
   if (/rate_limit/.test(code) || e.status === 429 || /rate limit|too many|only request this after/.test(msg))
     return "Too many attempts. Please wait a minute and try again.";
-  if (/provider is not enabled|unsupported provider/.test(msg)) return "This sign-in method isn't enabled yet.";
-  if (code === "email_provider_disabled" || /signups not allowed|email.*disabled/.test(msg)) return "Email sign-in is currently disabled.";
+  if (/provider is not enabled|unsupported provider/.test(msg)) return "Google sign-in isn't enabled yet.";
+  if (code === "email_provider_disabled" || /signups not allowed|email.*disabled/.test(msg)) return "Email sign-up is currently disabled.";
   if (/error sending|smtp|unexpected_failure/.test(msg + " " + code) || e.status === 500)
-    return "We couldn't send the email. Email delivery may not be set up yet. Please try again later.";
+    return "We couldn't send the confirmation email. Email delivery may not be set up yet. Please try again later.";
   if (/failed to fetch|network/.test(msg)) return "No connection. Check your internet and try again.";
   return "Something went wrong. Please try again.";
 }
@@ -66,9 +70,9 @@ export function describeAuthError(err: unknown): string {
 /** Keys passed from /auth/callback to /login as ?e=KEY. Fixed texts only; URL text is never displayed. */
 export const LOGIN_ERROR_TEXT: Record<string, string> = {
   cancelled: "Sign-in was cancelled.",
-  expired: "That sign-in link has expired or was already used. Request a new one.",
+  expired: "That link has expired or was already used. Sign in with your email and password, or try Google again.",
   failed: "Sign-in could not be completed. Please try again.",
-  wrongbrowser: "Open the email link in the same browser where you requested it, or use the code from the email instead.",
+  wrongbrowser: "Open the confirmation link in the same browser you signed up with, or sign in with your email and password.",
   config: "Sign-in is unavailable because this server isn't configured.",
 };
 

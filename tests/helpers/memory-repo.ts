@@ -3,7 +3,7 @@
 import type { Boundary } from "@/lib/fare";
 import type { RideStatus } from "@/lib/ride-state";
 import type { Loc, LocSource, Ride, RiderApproval, RiderInfo } from "@/lib/types";
-import type { NewLoc, NewRide, Repo } from "@/lib/repo";
+import type { LocationDetailsPatch, NewLoc, NewRide, Repo } from "@/lib/repo";
 import { ApiError } from "@/lib/errors";
 
 interface Store { locs: Loc[]; rides: Ride[]; riders: Map<string, RiderInfo>; seq: number; boundary: Boundary }
@@ -27,9 +27,9 @@ function seed(): Store {
   }));
   const riders = new Map<string, RiderInfo>();
   riders.set("test-rider", { userId: "test-rider", name: "Test Rider", approval: "approved", online: false,
-    vehicle: { registration: "TEST-TRICYCLE-1", approval: "approved" } });
+    vehicle: { registration: "TEST-TRICYCLE-1", approval: "approved", capacity: 3, capacityVerified: true } });
   riders.set("test-rider-pending", { userId: "test-rider-pending", name: "Test Applicant", approval: "pending", online: false,
-    vehicle: { registration: "TEST-TRICYCLE-2", approval: "pending" } });
+    vehicle: { registration: "TEST-TRICYCLE-2", approval: "pending", capacity: 3, capacityVerified: false } });
   // TEST-ONLY square around (0,0). Not real campus coordinates.
   return { locs, rides: [], riders, seq: 1, boundary: [[-1, -1], [-1, 1], [1, 1], [1, -1]] };
 }
@@ -45,9 +45,16 @@ class MemoryRepo implements Repo {
   async getBoundary(): Promise<Boundary> { return S().boundary; }
   async listLocations(all = false) { return clone(S().locs.filter((l) => all || l.active)); }
   async addLocation(l: NewLoc, _adminId: string) {
-    const loc: Loc = { id: `loc-${S().locs.length + 1}-${Date.now()}`, name: l.name, description: l.description, latitude: l.latitude, longitude: l.longitude,
-      verified: false, status: "selected", source: l.source, pickupAllowed: l.pickupAllowed, destinationAllowed: l.destinationAllowed, active: true };
+    const located = l.latitude !== undefined && l.longitude !== undefined && l.source !== undefined;
+    const loc: Loc = { id: `loc-${S().locs.length + 1}-${Date.now()}`, name: l.name, description: l.description,
+      latitude: located ? l.latitude! : 0, longitude: located ? l.longitude! : 0,
+      verified: false, status: located ? "selected" : "placeholder", source: located ? l.source! : null,
+      pickupAllowed: l.pickupAllowed, destinationAllowed: l.destinationAllowed, active: true };
     S().locs.push(loc); return clone(loc);
+  }
+  async updateLocationDetails(id: string, p: LocationDetailsPatch) {
+    const l = S().locs.find((x) => x.id === id); if (!l) throw new ApiError(404, "NOT_FOUND", "Landmark not found.");
+    Object.assign(l, p); return clone(l); // coordinates and verification are untouched, as in the real repo
   }
   async setLocationPosition(id: string, p: { latitude: number; longitude: number; source: Exclude<LocSource, "legacy"> }) {
     const l = S().locs.find((x) => x.id === id); if (!l) throw new ApiError(404, "NOT_FOUND", "Landmark not found.");
@@ -75,7 +82,7 @@ class MemoryRepo implements Repo {
       riderId: null, riderName: null, vehicleReg: null,
       pickup: { ...n.pickup, label: pick ? pick.name : "GPS pin" },
       destination: { id: dest.id, name: dest.name },
-      fareKobo: n.fareKobo, currency: "NGN", paymentMethod: n.paymentMethod, paymentStatus: "outstanding",
+      fareKobo: n.fareKobo, currency: "NGN", passengerCount: n.passengerCount, paymentMethod: n.paymentMethod, paymentStatus: "outstanding",
       status: "searching", requestedAt: new Date().toISOString(), cancellationReason: null, _k: n.idempotencyKey,
     };
     S().rides.unshift(ride); return clone(ride);
@@ -101,6 +108,10 @@ class MemoryRepo implements Repo {
     if (S().rides.some((x) => x.riderId === riderId && RIDER_BUSY.includes(x.status)))
       throw new ApiError(409, "RIDER_BUSY", "Finish your current ride first.");
     const info = S().riders.get(riderId)!;
+    if (r.passengerCount > 1) { // mirrors accept_ride_for in migration 0006
+      if (!info.vehicle?.capacityVerified) throw new ApiError(409, "CAPACITY_UNVERIFIED", "Capacity not confirmed.");
+      if (info.vehicle.capacity < r.passengerCount) throw new ApiError(409, "OVER_CAPACITY", "Over capacity.");
+    }
     r.status = "assigned"; r.riderId = riderId; r.riderName = info.name; r.vehicleReg = info.vehicle?.registration ?? null;
     return clone(r);
   }
@@ -112,11 +123,15 @@ class MemoryRepo implements Repo {
     const existing = S().riders.get(actorId);
     if (existing) return clone(existing);
     const info: RiderInfo = { userId: actorId, name: nameOf(actorId), approval: "pending", online: false,
-      vehicle: { registration: reg ?? null, approval: "pending" } };
+      vehicle: { registration: reg ?? null, approval: "pending", capacity: 3, capacityVerified: false } };
     S().riders.set(actorId, info); return clone(info);
   }
   async setOnline(id: string, online: boolean) { const r = S().riders.get(id); if (r) r.online = online; }
   async listRiders() { return clone([...S().riders.values()]); }
+  async setVehicleCapacity(riderId: string, capacity: number) {
+    const r = S().riders.get(riderId); if (!r?.vehicle) throw new ApiError(404, "NOT_FOUND", "Rider not found.");
+    r.vehicle.capacity = capacity; r.vehicle.capacityVerified = true; return clone(r);
+  }
   async setRiderApproval(id: string, status: RiderApproval) {
     const r = S().riders.get(id);
     if (!r) throw new ApiError(404, "NOT_FOUND", "Rider not found.");

@@ -1,89 +1,78 @@
-import type { Role } from "@/lib/types";
+import { describe, expect, it } from "vitest";
+import {
+  LOGIN_ERROR_TEXT, callbackUrl, canOpen, describeAuthError, describeSessionProblem, destinationFor, flagOn,
+  homeFor, nameProblem, normalizeEmail, passwordProblem, safeNext,
+} from "@/lib/auth-utils";
+import * as authUtils from "@/lib/auth-utils";
 
-/** sessionStorage key holding the page to open after sign-in (kept out of the redirect URL on purpose). */
-export const NEXT_KEY = "babride:next";
-export const COOLDOWN_KEY = "babride:otp-until";
-export const OTP_COOLDOWN_SECONDS = 60;
+describe("sign-in options", () => {
+  it("has no email-code or magic-link helpers left (only Google and email + password remain)", () => {
+    expect("normalizeCode" in authUtils).toBe(false);
+    expect("OTP_COOLDOWN_SECONDS" in authUtils).toBe(false);
+    expect("COOLDOWN_KEY" in authUtils).toBe(false);
+  });
+  it("never tells the user to use an emailed code", () => {
+    for (const t of Object.values(LOGIN_ERROR_TEXT)) expect(/code from the email|email code/i.test(t)).toBe(false);
+  });
+});
 
-const ALLOWED_NEXT = ["/student", "/rider", "/rider/join", "/admin"];
+describe("callback URL", () => {
+  it("is built from the CURRENT origin, never a hard-coded domain", () => {
+    expect(callbackUrl("http://localhost:3000")).toBe("http://localhost:3000/auth/callback");
+    expect(callbackUrl("https://app.example.test")).toBe("https://app.example.test/auth/callback");
+  });
+});
 
-/** Only same-site paths from a fixed allow-list. Anything else (absolute URLs, //host, backslashes) is dropped. */
-export function safeNext(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const p = raw; // not trimmed: stray whitespace or control characters mean "reject"
-  if (!p.startsWith("/") || p.startsWith("//") || p.includes("\\") || /[\u0000-\u001f]/.test(p)) return null;
-  const path = p.split(/[?#]/)[0];
-  return ALLOWED_NEXT.includes(path) ? path : null;
-}
+describe("redirect safety", () => {
+  it("allows only listed same-site paths", () => {
+    expect(safeNext("/student")).toBe("/student");
+    expect(safeNext("/rider/join?x=1")).toBe("/rider/join");
+    for (const bad of ["https://evil.test", "//evil.test", "/\\evil", "/admin\n", "/unknown", "", null, undefined]) expect(safeNext(bad as string | null)).toBeNull();
+  });
+  it("sends each role only to its own area", () => {
+    expect(homeFor("admin")).toBe("/admin");
+    expect(destinationFor("student", "/admin")).toBe("/student");
+    expect(destinationFor("rider", "/student")).toBe("/rider");
+    expect(destinationFor("student", "/rider/join")).toBe("/rider/join");
+    expect(canOpen("admin", "/student")).toBe(false);
+  });
+});
 
-export const homeFor = (role: Role): string => (role === "admin" ? "/admin" : role === "rider" ? "/rider" : "/student");
-/** Which pages each role may open. A requested page the role cannot use is ignored (student -> student area, rider -> rider area). */
-export function canOpen(role: Role, path: string): boolean {
-  if (path === "/student") return role === "student";
-  if (path === "/rider") return role === "rider";
-  if (path === "/rider/join") return role === "student" || role === "rider";
-  if (path === "/admin") return role === "admin";
-  return false;
-}
-export const destinationFor = (role: Role, next: string | null | undefined): string => {
-  const n = safeNext(next);
-  return n && canOpen(role, n) ? n : homeFor(role);
-};
+describe("form validation", () => {
+  it("normalises and validates email", () => {
+    expect(normalizeEmail("  Ada@Example.COM ")).toBe("ada@example.com");
+    expect(normalizeEmail("nope")).toBeNull();
+    expect(normalizeEmail("a b@c.de")).toBeNull();
+  });
+  it("checks password length before calling the provider", () => {
+    expect(passwordProblem("short")).toBe("Use at least 8 characters.");
+    expect(passwordProblem("long enough pw")).toBeNull();
+    expect(passwordProblem("x".repeat(73))).toBe("Use 72 characters or fewer.");
+  });
+  it("requires a plausible name", () => {
+    expect(nameProblem(" ")).toBe("Enter your full name.");
+    expect(nameProblem("Ada Obi")).toBeNull();
+  });
+  it("reads on/off flags tolerantly", () => {
+    expect(flagOn(" TRUE ")).toBe(true); expect(flagOn("yes")).toBe(true);
+    expect(flagOn(undefined)).toBe(false); expect(flagOn("false")).toBe(false);
+  });
+});
 
-/** Fixed callback path (no query string) so the Supabase redirect allow-list entry is exact. */
-export const callbackUrl = (origin: string): string => `${origin}/auth/callback`;
-
-export function normalizeEmail(raw: string): string | null {
-  const e = raw.trim().toLowerCase();
-  return e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null;
-}
-
-/** Accepts "123 456" or "123-456". Supabase codes are 6 to 10 digits depending on the project setting. */
-export function normalizeCode(raw: string): string | null {
-  const c = raw.replace(/[\s-]/g, "");
-  return /^\d{6,10}$/.test(c) ? c : null;
-}
-
-/** Friendly, non-leaky messages. Never shows raw provider text. */
-export function describeAuthError(err: unknown): string {
-  const e = (err ?? {}) as { message?: string; code?: string; status?: number };
-  const msg = (e.message ?? "").toLowerCase();
-  const code = (e.code ?? "").toLowerCase();
-  if (code === "invalid_credentials" || /invalid login credentials/.test(msg)) return "Incorrect email or password.";
-  if (code === "otp_expired" || /expired|invalid.*(token|otp|code)|token.*invalid/.test(msg))
-    return "That code is invalid or has expired. Check it and try again, or request a new one.";
-  if (/rate_limit/.test(code) || e.status === 429 || /rate limit|too many|only request this after/.test(msg))
-    return "Too many attempts. Please wait a minute and try again.";
-  if (/provider is not enabled|unsupported provider/.test(msg)) return "This sign-in method isn't enabled yet.";
-  if (code === "email_provider_disabled" || /signups not allowed|email.*disabled/.test(msg)) return "Email sign-in is currently disabled.";
-  if (/error sending|smtp|unexpected_failure/.test(msg + " " + code) || e.status === 500)
-    return "We couldn't send the email. Email delivery may not be set up yet. Please try again later.";
-  if (/failed to fetch|network/.test(msg)) return "No connection. Check your internet and try again.";
-  return "Something went wrong. Please try again.";
-}
-
-/** Keys passed from /auth/callback to /login as ?e=KEY. Fixed texts only; URL text is never displayed. */
-export const LOGIN_ERROR_TEXT: Record<string, string> = {
-  cancelled: "Sign-in was cancelled.",
-  expired: "That sign-in link has expired or was already used. Request a new one.",
-  failed: "Sign-in could not be completed. Please try again.",
-  wrongbrowser: "Open the email link in the same browser where you requested it, or use the code from the email instead.",
-  config: "Sign-in is unavailable because this server isn't configured.",
-};
-
-/** Reads a NEXT_PUBLIC on/off flag. Tolerates case, spaces and 1/yes (e.g. Windows editors). Anything else is off. */
-export const flagOn = (v: string | undefined): boolean => ["true", "1", "yes"].includes((v ?? "").trim().toLowerCase());
-
-/**
- * Message for "the browser says you're signed in, but our server call failed".
- * In development the 401 hint names the likely configuration causes (names only, never values).
- */
-export function describeSessionProblem(err: unknown, dev = process.env.NODE_ENV !== "production"): string {
-  const e = (err ?? {}) as { status?: number; message?: string };
-  if (e.status === 401)
-    return dev
-      ? "Signed in with Supabase, but the server rejected the session. Check that SUPABASE_SERVICE_ROLE_KEY belongs to the same project as NEXT_PUBLIC_SUPABASE_URL, then restart the dev server."
-      : "We couldn't verify your sign-in with the server. Please try again.";
-  if (e.status === 403 || e.status === 503) return e.message || "Your account could not be loaded.";
-  return "Your account could not be loaded. Please try again.";
-}
+describe("error messages", () => {
+  it("are friendly and never leak provider text", () => {
+    expect(describeAuthError({ code: "invalid_credentials", message: "Invalid login credentials" })).toBe("Incorrect email or password.");
+    expect(describeAuthError({ code: "user_already_exists" })).toMatch(/already exists/);
+    expect(describeAuthError({ message: "User already registered" })).toMatch(/Sign in instead/);
+    expect(describeAuthError({ code: "email_not_confirmed" })).toMatch(/confirm your email/i);
+    expect(describeAuthError({ code: "weak_password" })).toMatch(/stronger password/);
+    expect(describeAuthError({ status: 429 })).toMatch(/Too many attempts/);
+    expect(describeAuthError({ message: "Failed to fetch" })).toMatch(/No connection/);
+    expect(describeAuthError({ message: "SELECT * FROM secrets" })).toBe("Something went wrong. Please try again.");
+  });
+  it("explains a rejected session without exposing values", () => {
+    expect(describeSessionProblem({ status: 401 }, false)).toMatch(/couldn't verify/);
+    expect(describeSessionProblem({ status: 401 }, true)).toMatch(/SUPABASE_SERVICE_ROLE_KEY/);
+    expect(describeSessionProblem({ status: 403, message: "Suspended." })).toBe("Suspended.");
+  });
+});

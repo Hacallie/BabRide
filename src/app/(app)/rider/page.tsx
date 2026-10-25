@@ -7,6 +7,16 @@ import { formatNaira } from "@/lib/fare";
 import { btnAccent, btnDanger, btnGhost, btnPrimary, card } from "@/components/ui";
 import type { Ride, RiderInfo } from "@/lib/types";
 
+const POLL_MS = 5000;
+/** Mirrors the server rule: one passenger fits any approved vehicle; a group needs an admin-confirmed capacity that is large enough. */
+function fitNote(info: RiderInfo, passengers: number): string | null {
+  if (passengers <= 1) return null;
+  const v = info.vehicle;
+  if (!v?.capacityVerified) return "Your seat capacity isn't confirmed yet. Ask an administrator, then you can take groups.";
+  if (v.capacity < passengers) return `Too many passengers: your vehicle seats ${v.capacity}.`;
+  return null;
+}
+
 interface Feed { rider: RiderInfo | null; active: Ride | null; requests: Ride[]; recent: Ride[] }
 const NEXT: Record<string, { action: string; text: string }> = {
   assigned: { action: "depart", text: "Head to pickup" },
@@ -18,7 +28,7 @@ const NEXT: Record<string, { action: string; text: string }> = {
 function Dashboard() {
   const [feed, setFeed] = useState<Feed | null>(null); const [err, setErr] = useState<string | null>(null); const [busy, setBusy] = useState(false);
   const load = useCallback(async () => { try { setFeed(await api<Feed>("/api/v1/rider/requests")); } catch (e) { setErr(e instanceof Error ? e.message : "Connection problem."); } }, []);
-  useEffect(() => { void load(); const t = setInterval(() => { if (document.visibilityState === "visible") void load(); }, 3000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { void load(); const t = setInterval(() => { if (document.visibilityState === "visible") void load(); }, POLL_MS); return () => clearInterval(t); }, [load]);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true); setErr(null);
@@ -45,7 +55,7 @@ function Dashboard() {
           <div className="flex items-center justify-between"><StatusBadge status={a.status} /></div>
           <p className="mt-3 font-semibold">{a.pickup.label} → {a.destination.name}</p>
           <p className="text-2xl font-extrabold">{formatNaira(a.fareKobo)} <span className="text-base font-medium">· {a.paymentMethod}</span></p>
-          <p className="text-sm text-navy-800">Passenger: {a.studentName}</p>
+          <p className="text-sm text-navy-800">Passenger: {a.studentName} · <b>{a.passengerCount} {a.passengerCount === 1 ? "person" : "people"}</b></p>
           {NEXT[a.status] && <button disabled={busy} onClick={() => run(() => api(`/api/v1/rides/${a.id}/${NEXT[a.status]!.action}`, { method: "POST" }))} className={`${btnPrimary} mt-4 w-full`}>{NEXT[a.status]!.text}</button>}
           {(a.status === "assigned" || a.status === "rider_arriving") && <button disabled={busy} onClick={() => run(() => api(`/api/v1/rides/${a.id}/release`, { method: "POST" }))} className={`${btnDanger} mt-2 w-full`}>Release this ride</button>}
         </section>
@@ -58,9 +68,11 @@ function Dashboard() {
             : feed.requests.length === 0 ? <p className="text-navy-800">No requests right now. This page checks every few seconds.</p>
             : <ul className="space-y-3">{feed.requests.map((r) => (
                 <li key={r.id} className={card}>
-                  <p className="font-semibold">{r.pickup.label} → {r.destination.name}</p>
+                  <p className="break-words font-semibold">{r.pickup.label} → {r.destination.name}</p>
+                  <p className="mt-1 text-sm font-semibold text-navy-900">{r.passengerCount} {r.passengerCount === 1 ? "passenger" : "passengers"}</p>
                   <p className="text-2xl font-extrabold">{formatNaira(r.fareKobo)} <span className="text-base font-medium">· {r.paymentMethod}</span></p>
-                  <button disabled={busy} onClick={() => run(() => api(`/api/v1/rides/${r.id}/accept`, { method: "POST" }))} className={`${btnAccent} mt-3 w-full`}>Accept ride</button>
+                  {fitNote(info, r.passengerCount) && <p role="note" className="mt-2 rounded-lg bg-amber-50 p-2 text-sm text-navy-900">{fitNote(info, r.passengerCount)}</p>}
+                  <button disabled={busy || !!fitNote(info, r.passengerCount)} onClick={() => run(() => api(`/api/v1/rides/${r.id}/accept`, { method: "POST" }))} className={`${btnAccent} mt-3 w-full`}>Accept ride</button>
                 </li>))}</ul>}
         </section>
       )}

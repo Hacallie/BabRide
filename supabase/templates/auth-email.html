@@ -1,14 +1,12 @@
-<!-- Paste into Supabase Dashboard > Authentication > Emails > Templates.
-     Use the SAME body for BOTH "Magic Link" and "Confirm signup" (new users receive "Confirm signup").
-     Suggested subject: Your Bab Ride sign-in code
-     {{ .Token }} is the one-time code Supabase generates and later verifies. {{ .ConfirmationURL }} is the one-time link. -->
+<!-- Paste into Supabase Dashboard > Authentication > Emails > Templates > "Confirm signup".
+     Bab Ride sign-in is Google or email + password, so this is the only email new users receive.
+     Suggested subject: Confirm your Bab Ride account
+     {{ .ConfirmationURL }} is the one-time confirmation link. (There is no code to type any more.) -->
 <div style="font-family:Inter,Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#071A3D">
   <h2 style="margin:0 0 8px;color:#245CE2">Bab Ride</h2>
-  <p style="margin:0 0 16px">Use this code to sign in:</p>
-  <p style="margin:0 0 20px;font-size:32px;font-weight:700;letter-spacing:6px;background:#F5F8FF;border-radius:12px;padding:16px;text-align:center">{{ .Token }}</p>
-  <p style="margin:0 0 16px;color:#17356F">The code works once and expires soon. Enter it on the Bab Ride sign-in page.</p>
-  <p style="margin:0 0 16px">Or use the link instead (open it in the same browser where you asked for it):<br>
-    <a href="{{ .ConfirmationURL }}" style="color:#245CE2">Sign in to Bab Ride</a></p>
+  <p style="margin:0 0 16px">Welcome! Confirm your email address to finish creating your account.</p>
+  <p style="margin:0 0 20px"><a href="{{ .ConfirmationURL }}" style="display:inline-block;background:#245CE2;color:#ffffff;text-decoration:none;font-weight:700;border-radius:12px;padding:14px 22px">Confirm my email</a></p>
+  <p style="margin:0 0 16px;color:#17356F">Open the link in the same browser you signed up with. If it has expired, just sign in with your email and password, or create the account again.</p>
   <hr style="border:none;border-top:1px solid #E3EBFA;margin:24px 0">
-  <p style="margin:0;font-size:12px;color:#17356F">If you didn't ask for this, you can ignore this email. Nobody can sign in without the code. Bab Ride is not affiliated with or endorsed by Babcock University.</p>
+  <p style="margin:0;font-size:12px;color:#17356F">If you didn't create a Bab Ride account, you can ignore this email. Bab Ride is not affiliated with or endorsed by Babcock University.</p>
 </div>

@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // Browser Supabase client. Uses ONLY the public URL + anon key (never the service-role key).
 // Returns null when Supabase is not configured (the server reports that state).
-// PKCE: OAuth and magic-link sign-ins return a one-time ?code= that /auth/callback exchanges.
+// PKCE: Google sign-in and email-confirmation links return a one-time ?code= that /auth/callback exchanges.
 // detectSessionInUrl is off on purpose: the callback page exchanges the code exactly once, itself.
 let client: SupabaseClient | null = null;
 

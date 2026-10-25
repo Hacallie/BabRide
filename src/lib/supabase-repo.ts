@@ -3,13 +3,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Boundary, LngLat } from "@/lib/fare";
 import type { RideStatus } from "@/lib/ride-state";
 import type { Loc, LocSource, LocStatus, Ride, RiderApproval, RiderInfo } from "@/lib/types";
-import type { NewLoc, NewRide, Repo } from "@/lib/repo";
+import type { LocationDetailsPatch, NewLoc, NewRide, Repo } from "@/lib/repo";
 import { adminClient } from "@/lib/supabase-admin";
 import { ApiError } from "@/lib/errors";
 
 interface RideRow {
   id: string; student_id: string; assigned_rider_id: string | null;
-  pickup_latitude: number; pickup_longitude: number; pickup_location_id: string | null;
+  pickup_latitude: number | null; pickup_longitude: number | null; pickup_location_id: string | null; passenger_count: number | null;
   destination_location_id: string; fare_amount_kobo: number; currency: string;
   payment_method: "cash" | "electronic"; payment_status: "outstanding" | "collected";
   status: RideStatus; requested_at: string; cancellation_reason: string | null;
@@ -24,13 +24,13 @@ interface LocRow {
 interface RiderRow {
   user_id: string; approval_status: RiderApproval; is_online: boolean;
   profile: { full_name: string } | null;
-  vehicles: { registration_number: string | null; approval_status: "pending" | "approved" | "rejected" }[] | null;
+  vehicles: { registration_number: string | null; approval_status: "pending" | "approved" | "rejected"; capacity: number | null; capacity_verified: boolean | null }[] | null;
 }
 
 const RIDE_SELECT = "*, destination:campus_locations!rides_destination_location_id_fkey(id,name), " +
   "pickup:campus_locations!rides_pickup_location_id_fkey(name), " +
   "student:profiles!rides_student_id_fkey(full_name), rider:profiles!rides_assigned_rider_id_fkey(full_name)";
-const RIDER_SELECT = "user_id, approval_status, is_online, profile:profiles!rider_profiles_user_id_fkey(full_name), vehicles(registration_number, approval_status)";
+const RIDER_SELECT = "user_id, approval_status, is_online, profile:profiles!rider_profiles_user_id_fkey(full_name), vehicles(registration_number, approval_status, capacity, capacity_verified)";
 const TS: Partial<Record<RideStatus, string>> = {
   rider_arrived: "rider_arrived_at", in_progress: "started_at", completed: "completed_at", cancelled: "cancelled_at",
 };
@@ -43,7 +43,7 @@ const mapLoc = (l: LocRow): Loc => ({
 const mapRider = (r: RiderRow): RiderInfo => {
   const v = r.vehicles?.[0];
   return { userId: r.user_id, name: r.profile?.full_name ?? "Rider", approval: r.approval_status, online: r.is_online,
-    vehicle: v ? { registration: v.registration_number, approval: v.approval_status } : null };
+    vehicle: v ? { registration: v.registration_number, approval: v.approval_status, capacity: v.capacity ?? 3, capacityVerified: v.capacity_verified === true } : null };
 };
 
 class SupabaseRepo implements Repo {
@@ -57,8 +57,11 @@ class SupabaseRepo implements Repo {
     if (error || !data) throw new ApiError(503, "NOT_SEEDED", "Database is not seeded. Run supabase/seed.sql.");
     return (this.instId = data.id as string);
   }
-  private fail(e: { message: string }, status = 500): never {
-    console.error("db error", e.message);
+  private fail(e: { message: string; code?: string }, status = 500): never {
+    console.error("db error", e.code ?? "", e.message);
+    // 42703 undefined column, 42P01 undefined table, PGRST204/PGRST200 not in the schema cache: a migration has not been applied.
+    if (e.code && ["42703", "42P01", "PGRST204", "PGRST200", "PGRST205"].includes(e.code))
+      throw new ApiError(503, "MIGRATION_MISSING", "The database is missing a migration. The owner must apply every file in supabase/migrations (up to 0006), then try again.");
     throw new ApiError(status, "DB_ERROR", "Something went wrong. Please try again.");
   }
   private async mapRides(rows: RideRow[]): Promise<Ride[]> {
@@ -75,7 +78,7 @@ class SupabaseRepo implements Repo {
       vehicleReg: r.assigned_rider_id ? regs.get(r.assigned_rider_id) ?? null : null,
       pickup: { latitude: r.pickup_latitude, longitude: r.pickup_longitude, locationId: r.pickup_location_id, label: r.pickup?.name ?? "GPS pin" },
       destination: { id: r.destination_location_id, name: r.destination?.name ?? "Destination" },
-      fareKobo: r.fare_amount_kobo, currency: r.currency, paymentMethod: r.payment_method, paymentStatus: r.payment_status,
+      fareKobo: r.fare_amount_kobo, currency: r.currency, passengerCount: r.passenger_count ?? 1, paymentMethod: r.payment_method, paymentStatus: r.payment_status,
       status: r.status, requestedAt: r.requested_at, cancellationReason: r.cancellation_reason,
     }));
   }
@@ -99,13 +102,30 @@ class SupabaseRepo implements Repo {
   }
   async addLocation(l: NewLoc, adminId: string) {
     const now = new Date().toISOString();
-    // is_verified is never set here: a map pin is a selection, not ground verification.
+    const located = l.latitude !== undefined && l.longitude !== undefined && l.source !== undefined;
+    // is_verified is never set here: a pin is a selection, not ground verification.
+    // No position given: store the 0,0 placeholder with location_source NULL, which the app reads as "Not located yet".
     const { data, error } = await this.db.from("campus_locations").insert({
       institution_id: await this.institutionId(), name: l.name, description: l.description,
-      latitude: l.latitude, longitude: l.longitude, is_verified: false,
-      location_source: l.source, located_at: now, located_by: adminId,
+      latitude: located ? l.latitude : 0, longitude: located ? l.longitude : 0, is_verified: false,
+      location_source: located ? l.source : null, located_at: located ? now : null, located_by: located ? adminId : null,
       is_pickup_allowed: l.pickupAllowed, is_destination_allowed: l.destinationAllowed }).select().single();
     if (error) this.fail(error); return mapLoc(data as LocRow);
+  }
+  async updateLocationDetails(id: string, p: LocationDetailsPatch, _adminId: string) {
+    const patch: Record<string, unknown> = {};
+    if (p.name !== undefined) patch.name = p.name;
+    if (p.description !== undefined) patch.description = p.description;
+    if (p.pickupAllowed !== undefined) patch.is_pickup_allowed = p.pickupAllowed;
+    if (p.destinationAllowed !== undefined) patch.is_destination_allowed = p.destinationAllowed;
+    if (p.active !== undefined) patch.is_active = p.active;
+    patch.updated_at = new Date().toISOString();
+    // Coordinates, source and verification columns are deliberately not in this patch.
+    const { data, error } = await this.db.from("campus_locations").update(patch).eq("id", id)
+      .eq("institution_id", await this.institutionId()).select().maybeSingle();
+    if (error) this.fail(error);
+    if (!data) throw new ApiError(404, "NOT_FOUND", "Landmark not found.");
+    return mapLoc(data as LocRow);
   }
   async setLocationPosition(id: string, p: { latitude: number; longitude: number; source: Exclude<LocSource, "legacy"> }, adminId: string) {
     const { data, error } = await this.db.from("campus_locations").update({
@@ -135,7 +155,7 @@ class SupabaseRepo implements Repo {
     const { data, error } = await this.db.from("rides").insert({
       institution_id: await this.institutionId(), student_id: n.studentId, idempotency_key: n.idempotencyKey,
       pickup_latitude: n.pickup.latitude, pickup_longitude: n.pickup.longitude, pickup_location_id: n.pickup.locationId,
-      destination_location_id: n.destinationLocationId, fare_amount_kobo: n.fareKobo,
+      passenger_count: n.passengerCount, destination_location_id: n.destinationLocationId, fare_amount_kobo: n.fareKobo,
       payment_method: n.paymentMethod, payment_status: "outstanding" }).select("id").single();
     if (error) {
       if (error.code === "23505") {
@@ -174,6 +194,8 @@ class SupabaseRepo implements Repo {
       if (m.includes("ride_unavailable")) throw new ApiError(409, "RIDE_UNAVAILABLE", "This ride is no longer available.");
       if (m.includes("rider_busy")) throw new ApiError(409, "RIDER_BUSY", "Finish your current ride first.");
       if (m.includes("rider_not_eligible")) throw new ApiError(403, "RIDER_NOT_APPROVED", "Your rider account is not eligible.");
+      if (m.includes("capacity_unverified")) throw new ApiError(409, "CAPACITY_UNVERIFIED", "An administrator hasn't confirmed your vehicle's seat capacity yet, so you can't take a group.");
+      if (m.includes("over_capacity")) throw new ApiError(409, "OVER_CAPACITY", "This ride has more passengers than your vehicle seats.");
       this.fail(error);
     }
     return (await this.one(rideId))!;
@@ -204,6 +226,8 @@ class SupabaseRepo implements Repo {
     const v = await this.db.from("vehicles").insert({ rider_id: actorId, institution_id: prof.institution_id, registration_number: reg ?? null });
     if (v.error) {
       await undo();
+      // 23502 = NOT NULL violation: the database still requires a registration number, i.e. migration 0005 was not applied.
+      if (v.error.code === "23502") { console.error("db error: vehicles.registration_number is still NOT NULL (apply migration 0005)"); throw new ApiError(503, "MIGRATION_MISSING", "Rider applications can't be saved yet: the database is missing migration 0005. The owner must apply it, then you can try again."); }
       if (v.error.code === "23505") throw new ApiError(409, "VEHICLE_EXISTS", "That vehicle registration is already registered.");
       this.fail(v.error);
     }
@@ -224,6 +248,13 @@ class SupabaseRepo implements Repo {
     if (error) this.fail(error);
     await this.db.from("vehicles").update({ approval_status: status === "approved" ? "approved" : "rejected" }).eq("rider_id", id);
     const r = await this.getRider(id);
+    if (!r) throw new ApiError(404, "NOT_FOUND", "Rider not found.");
+    return r;
+  }
+  async setVehicleCapacity(riderId: string, capacity: number, _adminId: string) {
+    const { error } = await this.db.from("vehicles").update({ capacity, capacity_verified: true }).eq("rider_id", riderId);
+    if (error) this.fail(error);
+    const r = await this.getRider(riderId);
     if (!r) throw new ApiError(404, "NOT_FOUND", "Rider not found.");
     return r;
   }

@@ -8,7 +8,7 @@ export const GET = handle(async () => {
   const locs = await (await getRepo()).listLocations();
   return {
     landmarks: locs.map((l) => ({
-      id: l.id, name: l.name, description: l.description, verified: l.verified, status: l.status,
+      id: l.id, name: l.name, description: l.description, verified: l.verified, status: l.status, located: l.status !== "placeholder",
       pickupAllowed: l.pickupAllowed, destinationAllowed: l.destinationAllowed,
     })),
   };

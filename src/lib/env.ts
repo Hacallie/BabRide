@@ -9,6 +9,7 @@ const SPECS: Spec[] = [
   { name: "SUPABASE_SERVICE_ROLE_KEY", kind: "secret", required: "always" },
   { name: "NEXT_PUBLIC_APP_URL", kind: "url", required: "production" },
   { name: "BABRIDE_SEARCH_TIMEOUT_MIN", kind: "posint", required: "never" },
+  { name: "BABRIDE_MAX_PASSENGERS", kind: "posint", required: "never" },
 ];
 
 export type EnvSource = Record<string, string | undefined>;

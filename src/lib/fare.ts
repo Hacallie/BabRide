@@ -56,3 +56,15 @@ export function quoteFare(pickup: Point, destination: Point, cfg: QuoteConfig): 
 }
 
 export const formatNaira = (kobo: number) => `₦${(kobo / 100).toLocaleString("en-NG")}`;
+
+/**
+ * Landmark-defined service area (opt-in: BABRIDE_SERVICE_AREA=landmarks). Two DIFFERENT active landmarks are an
+ * eligible trip; no coordinates are needed. The fare is still the fixed ₦200 and is still computed on the server.
+ */
+export function quoteBetweenLandmarks(pickupId: string, destinationId: string, cfg: { fareKobo?: number } = {}): QuoteResult {
+  if (!pickupId || !destinationId || pickupId === destinationId)
+    return { ok: false, code: "SAME_LOCATION", message: "Pickup and destination must be different." };
+  const fare = cfg.fareKobo ?? FIXED_FARE_KOBO;
+  if (fare !== FIXED_FARE_KOBO) throw new Error("Institution fare differs from the validated fixed fare");
+  return { ok: true, fareKobo: fare, currency: CURRENCY };
+}
