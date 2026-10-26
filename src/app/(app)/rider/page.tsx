@@ -44,17 +44,19 @@ function Dashboard() {
   return (
     <div className="space-y-5 py-6">
       <div className="flex items-center justify-between gap-3">
-        <div><h1 className="text-3xl font-extrabold text-navy-900">Rider</h1><p className="text-sm text-navy-800">{info.name}{info.vehicle?.registration ? ` · ${info.vehicle.registration}` : ""}</p></div>
+        <div><h1 className="text-3xl font-extrabold text-navy-900">Rider</h1><p className="text-sm text-navy-800">{info.name}{info.vehicle?.registration ? ` · ${info.vehicle.registration}` : ""}</p>
+          {info.vehicle && <p className="text-sm text-navy-800">Passenger seats: <b>{info.vehicle.capacity}</b> {info.vehicle.capacityVerified ? <span className="text-emerald-800">(confirmed)</span> : <span className="text-accent-dark">(waiting for an administrator to confirm)</span>}</p>}</div>
         <button disabled={busy || !!a} aria-pressed={info.online} onClick={() => run(() => api("/api/v1/rider/availability", { method: "POST", body: { online: !info.online } }))}
           className={`${info.online ? btnAccent : btnGhost}`}>{info.online ? "Online · tap to go offline" : "Offline · go online"}</button>
       </div>
       {err && <p role="alert" className="rounded-xl bg-red-50 p-3 text-red-800">{err}</p>}
+      {!info.online && !a && <p role="status" className="rounded-xl bg-navy-50 p-3 text-sm text-navy-900">You're offline, so you won't get ride requests. You're set online automatically when you sign in; if you lost your connection for a while you're taken offline, so tap <b>Go online</b> to continue.</p>}
 
       {a && (
         <section className={card} aria-live="polite">
           <div className="flex items-center justify-between"><StatusBadge status={a.status} /></div>
           <p className="mt-3 font-semibold">{a.pickup.label} → {a.destination.name}</p>
-          <p className="text-2xl font-extrabold">{formatNaira(a.fareKobo)} <span className="text-base font-medium">· {a.paymentMethod}</span></p>
+          <p className="text-2xl font-extrabold">{formatNaira(a.fareKobo)} <span className="text-base font-medium">· {a.paymentMethod} · {a.passengerCount} × {formatNaira(a.farePerPassengerKobo)}</span></p>
           <p className="text-sm text-navy-800">Passenger: {a.studentName} · <b>{a.passengerCount} {a.passengerCount === 1 ? "person" : "people"}</b></p>
           {NEXT[a.status] && <button disabled={busy} onClick={() => run(() => api(`/api/v1/rides/${a.id}/${NEXT[a.status]!.action}`, { method: "POST" }))} className={`${btnPrimary} mt-4 w-full`}>{NEXT[a.status]!.text}</button>}
           {(a.status === "assigned" || a.status === "rider_arriving") && <button disabled={busy} onClick={() => run(() => api(`/api/v1/rides/${a.id}/release`, { method: "POST" }))} className={`${btnDanger} mt-2 w-full`}>Release this ride</button>}
@@ -62,7 +64,7 @@ function Dashboard() {
       )}
 
       {!a && (
-        <section aria-labelledby="req">
+        <section aria-labelledby="req" id="requests">
           <h2 id="req" className="mb-2 text-xl font-bold">Incoming requests</h2>
           {!info.online ? <p className="text-navy-800">Go online to see ride requests.</p>
             : feed.requests.length === 0 ? <p className="text-navy-800">No requests right now. This page checks every few seconds.</p>
@@ -70,15 +72,15 @@ function Dashboard() {
                 <li key={r.id} className={card}>
                   <p className="break-words font-semibold">{r.pickup.label} → {r.destination.name}</p>
                   <p className="mt-1 text-sm font-semibold text-navy-900">{r.passengerCount} {r.passengerCount === 1 ? "passenger" : "passengers"}</p>
-                  <p className="text-2xl font-extrabold">{formatNaira(r.fareKobo)} <span className="text-base font-medium">· {r.paymentMethod}</span></p>
+                  <p className="text-2xl font-extrabold">{formatNaira(r.fareKobo)} <span className="text-base font-medium">· {r.paymentMethod} · {r.passengerCount} × {formatNaira(r.farePerPassengerKobo)}</span></p>
                   {fitNote(info, r.passengerCount) && <p role="note" className="mt-2 rounded-lg bg-amber-50 p-2 text-sm text-navy-900">{fitNote(info, r.passengerCount)}</p>}
                   <button disabled={busy || !!fitNote(info, r.passengerCount)} onClick={() => run(() => api(`/api/v1/rides/${r.id}/accept`, { method: "POST" }))} className={`${btnAccent} mt-3 w-full`}>Accept ride</button>
                 </li>))}</ul>}
         </section>
       )}
 
-      <section aria-labelledby="rec">
-        <h2 id="rec" className="mb-2 text-xl font-bold">Recent trips</h2>
+      <section aria-labelledby="rec" id="trips">
+        <h2 id="rec" className="mb-2 text-xl font-bold">My trips</h2>
         {feed.recent.length === 0 ? <p className="text-navy-800">No trips yet.</p> : (
           <ul className="space-y-2">{feed.recent.map((r) => (
             <li key={r.id} className={`${card} !p-4`}>

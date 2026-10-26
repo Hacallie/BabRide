@@ -6,6 +6,7 @@ import type { Loc, LocSource, LocStatus, Ride, RiderApproval, RiderInfo } from "
 import type { LocationDetailsPatch, NewLoc, NewRide, Repo } from "@/lib/repo";
 import { adminClient } from "@/lib/supabase-admin";
 import { ApiError } from "@/lib/errors";
+import { deriveLocation } from "@/lib/loc-derive";
 
 interface RideRow {
   id: string; student_id: string; assigned_rider_id: string | null;
@@ -22,28 +23,27 @@ interface LocRow {
   location_source: LocSource | null;
 }
 interface RiderRow {
-  user_id: string; approval_status: RiderApproval; is_online: boolean;
+  user_id: string; approval_status: RiderApproval; is_online: boolean; last_seen_at: string | null;
   profile: { full_name: string } | null;
-  vehicles: { registration_number: string | null; approval_status: "pending" | "approved" | "rejected"; capacity: number | null; capacity_verified: boolean | null }[] | null;
+  vehicles: { registration_number: string | null; approval_status: "pending" | "approved" | "rejected"; capacity: number | null; capacity_verified: boolean | null; capacity_declared: boolean | null }[] | null;
 }
 
 const RIDE_SELECT = "*, destination:campus_locations!rides_destination_location_id_fkey(id,name), " +
   "pickup:campus_locations!rides_pickup_location_id_fkey(name), " +
   "student:profiles!rides_student_id_fkey(full_name), rider:profiles!rides_assigned_rider_id_fkey(full_name)";
-const RIDER_SELECT = "user_id, approval_status, is_online, profile:profiles!rider_profiles_user_id_fkey(full_name), vehicles(registration_number, approval_status, capacity, capacity_verified)";
+const RIDER_SELECT = "user_id, approval_status, is_online, profile:profiles!rider_profiles_user_id_fkey(full_name), vehicles(registration_number, approval_status, capacity, capacity_verified, capacity_declared)";
 const TS: Partial<Record<RideStatus, string>> = {
   rider_arrived: "rider_arrived_at", in_progress: "started_at", completed: "completed_at", cancelled: "cancelled_at",
 };
 
-const locStatus = (l: LocRow): LocStatus => (l.is_verified ? "verified" : l.location_source ? "selected" : "placeholder");
 const mapLoc = (l: LocRow): Loc => ({
   id: l.id, name: l.name, description: l.description ?? "", latitude: l.latitude, longitude: l.longitude,
-  verified: l.is_verified, status: locStatus(l), source: l.location_source ?? null, pickupAllowed: l.is_pickup_allowed, destinationAllowed: l.is_destination_allowed, active: l.is_active,
+  verified: l.is_verified && deriveLocation(l).status === "verified", status: deriveLocation(l).status, source: deriveLocation(l).source, pickupAllowed: l.is_pickup_allowed, destinationAllowed: l.is_destination_allowed, active: l.is_active,
 });
 const mapRider = (r: RiderRow): RiderInfo => {
   const v = r.vehicles?.[0];
-  return { userId: r.user_id, name: r.profile?.full_name ?? "Rider", approval: r.approval_status, online: r.is_online,
-    vehicle: v ? { registration: v.registration_number, approval: v.approval_status, capacity: v.capacity ?? 3, capacityVerified: v.capacity_verified === true } : null };
+  return { userId: r.user_id, name: r.profile?.full_name ?? "Rider", approval: r.approval_status, online: r.is_online, lastSeenAt: r.last_seen_at,
+    vehicle: v ? { registration: v.registration_number, approval: v.approval_status, capacity: v.capacity ?? 3, capacityVerified: v.capacity_verified === true, capacityDeclared: v.capacity_declared === true } : null };
 };
 
 class SupabaseRepo implements Repo {
@@ -78,7 +78,7 @@ class SupabaseRepo implements Repo {
       vehicleReg: r.assigned_rider_id ? regs.get(r.assigned_rider_id) ?? null : null,
       pickup: { latitude: r.pickup_latitude, longitude: r.pickup_longitude, locationId: r.pickup_location_id, label: r.pickup?.name ?? "GPS pin" },
       destination: { id: r.destination_location_id, name: r.destination?.name ?? "Destination" },
-      fareKobo: r.fare_amount_kobo, currency: r.currency, passengerCount: r.passenger_count ?? 1, paymentMethod: r.payment_method, paymentStatus: r.payment_status,
+      fareKobo: r.fare_amount_kobo, currency: r.currency, passengerCount: r.passenger_count ?? 1, farePerPassengerKobo: Math.round(r.fare_amount_kobo / (r.passenger_count ?? 1)), paymentMethod: r.payment_method, paymentStatus: r.payment_status,
       status: r.status, requestedAt: r.requested_at, cancellationReason: r.cancellation_reason,
     }));
   }
@@ -209,7 +209,7 @@ class SupabaseRepo implements Repo {
     const { data } = await this.db.from("rider_profiles").select(RIDER_SELECT).eq("user_id", id).maybeSingle();
     return data ? mapRider(data as unknown as RiderRow) : null;
   }
-  async applyRider(actorId: string, reg?: string) {
+  async applyRider(actorId: string, reg: string | undefined, seats: number) {
     const existing = await this.getRider(actorId); if (existing) return existing;
     const { data: prof } = await this.db.from("profiles").select("institution_id, role").eq("id", actorId).single();
     if (!prof) throw new ApiError(404, "NO_PROFILE", "Profile not found.");
@@ -223,7 +223,7 @@ class SupabaseRepo implements Repo {
     const a = await this.db.from("rider_profiles").insert({ user_id: actorId, approval_status: "pending" });
     if (a.error) { if (promoted) await this.db.from("profiles").update({ role: "student" }).eq("id", actorId).eq("role", "rider"); this.fail(a.error); }
     // The vehicle row is still created (ride acceptance needs an approved vehicle). The registration number is optional.
-    const v = await this.db.from("vehicles").insert({ rider_id: actorId, institution_id: prof.institution_id, registration_number: reg ?? null });
+    const v = await this.db.from("vehicles").insert({ rider_id: actorId, institution_id: prof.institution_id, registration_number: reg ?? null, capacity: seats, capacity_declared: true, capacity_verified: false });
     if (v.error) {
       await undo();
       // 23502 = NOT NULL violation: the database still requires a registration number, i.e. migration 0005 was not applied.
@@ -237,6 +237,17 @@ class SupabaseRepo implements Repo {
     const { error } = await this.db.from("rider_profiles").update({ is_online: online, last_seen_at: new Date().toISOString() }).eq("user_id", id);
     if (error) this.fail(error);
   }
+  async touchRider(id: string) {
+    const { error } = await this.db.from("rider_profiles").update({ last_seen_at: new Date().toISOString() }).eq("user_id", id);
+    if (error) this.fail(error);
+  }
+  async maxVerifiedCapacity() {
+    const { data, error } = await this.db.from("vehicles").select("capacity").eq("approval_status", "approved").eq("capacity_verified", true)
+      .order("capacity", { ascending: false }).limit(1);
+    if (error) this.fail(error);
+    const c = (data as { capacity: number }[] | null)?.[0]?.capacity;
+    return typeof c === "number" ? c : null;
+  }
   async listRiders() {
     const { data, error } = await this.db.from("rider_profiles").select(RIDER_SELECT).order("created_at", { ascending: false }).limit(200);
     if (error) this.fail(error); return ((data ?? []) as unknown as RiderRow[]).map(mapRider);
@@ -247,6 +258,8 @@ class SupabaseRepo implements Repo {
     const { error } = await this.db.from("rider_profiles").update(patch).eq("user_id", id);
     if (error) this.fail(error);
     await this.db.from("vehicles").update({ approval_status: status === "approved" ? "approved" : "rejected" }).eq("rider_id", id);
+    // Approving a rider means the administrator reviewed the application, including the seats the rider declared: confirm those seats.
+    if (status === "approved") await this.db.from("vehicles").update({ capacity_verified: true }).eq("rider_id", id).eq("capacity_declared", true);
     const r = await this.getRider(id);
     if (!r) throw new ApiError(404, "NOT_FOUND", "Rider not found.");
     return r;

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client-api";
+import { startRiderSession } from "@/lib/rider-session";
 import { NEXT_KEY, describeSessionProblem, destinationFor, safeNext } from "@/lib/auth-utils";
 import { browserSupabase } from "@/lib/supabase-browser";
 import type { Me } from "@/components/Gate";
@@ -45,6 +46,7 @@ export default function AuthCallback() {
       try { next = safeNext(sessionStorage.getItem(NEXT_KEY)); sessionStorage.removeItem(NEXT_KEY); } catch { /* storage unavailable */ }
       try {
         const me = await api<Me>("/api/v1/me");
+        if (me.actor.role === "rider") await startRiderSession(); // Google sign-in: same automatic availability as password sign-in
         router.replace(destinationFor(me.actor.role, next));
       } catch (e) {
         setProblem(describeSessionProblem(e));

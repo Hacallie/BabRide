@@ -85,7 +85,7 @@ function Admin() {
         <div className={card}>
           <p className="text-sm text-navy-700">Active standard fare</p>
           <p className="text-4xl font-extrabold">₦200</p>
-          <p className="mt-2 text-navy-800">The fare is locked at 20000 kobo in server code and by a database constraint. Authorized, audited fare changes are not built yet, so there is deliberately no edit control.</p>
+          <p className="mt-2 text-navy-800">The fare is ₦200 per passenger (20000 kobo), so a booking costs 20000 × passengers. It is locked in server code and by a database constraint. Authorized, audited fare changes are not built yet, so there is deliberately no edit control.</p>
         </div>)}
     </div>
   );

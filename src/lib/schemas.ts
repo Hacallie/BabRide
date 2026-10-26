@@ -25,15 +25,23 @@ export const quoteQuerySchema = z.object({
   latitude: optCoord(coord.latitude), longitude: optCoord(coord.longitude),
   locationId: z.string().min(1).max(100).optional(),
   destinationLocationId: z.string().min(1).max(100),
+  passengerCount: passengerCountSchema.default(1),
 });
 // The tricycle registration ("keke number") is optional. Unknown keys such as "role" are stripped, never trusted.
 const optionalReg = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().min(3).max(20).optional());
-export const riderApplySchema = z.object({ vehicleRegistration: optionalReg });
+// Seats = passengers the keke can legally and safely carry, NOT counting the driver. The upper limit is checked on the server
+// against BABRIDE_MAX_VEHICLE_SEATS; 8 here is the database's hard ceiling.
+export const passengerSeatsSchema = z.coerce.number({ invalid_type_error: "Enter the number of passenger seats." })
+  .int("Seats must be a whole number.").min(1, "Enter at least 1 passenger seat.").max(8, "That is more seats than a keke can have.");
+export const riderApplySchema = z.object({ vehicleRegistration: optionalReg, passengerSeats: passengerSeatsSchema });
+
 export const availabilitySchema = z.object({ online: z.boolean() });
 
 // Landmarks. The admin supplies a NAME and picks a point; coordinates come from the picker, never from typing.
 // There is deliberately no "verified" field: unknown keys are stripped, so a client cannot mark a location ground verified.
 const realPoint = (v: { latitude: number; longitude: number }) => !(Math.abs(v.latitude) < 0.001 && Math.abs(v.longitude) < 0.001);
+export const nearestBodySchema = z.object({ latitude: coord.latitude, longitude: coord.longitude })
+  .refine(realPoint, { message: "That location doesn't look valid." });
 const POINT_MSG = "Choose a real location on the map. (0, 0) is not a campus position.";
 export const locationSourceSchema = z.enum(["search", "gps", "map"]);
 // Creating a landmark needs a NAME. A position is optional: leave it empty and the landmark is saved as "Not located yet"

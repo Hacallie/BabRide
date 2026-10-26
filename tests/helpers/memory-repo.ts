@@ -26,10 +26,10 @@ function seed(): Store {
     pickupAllowed: true, destinationAllowed: true, active: true,
   }));
   const riders = new Map<string, RiderInfo>();
-  riders.set("test-rider", { userId: "test-rider", name: "Test Rider", approval: "approved", online: false,
-    vehicle: { registration: "TEST-TRICYCLE-1", approval: "approved", capacity: 3, capacityVerified: true } });
-  riders.set("test-rider-pending", { userId: "test-rider-pending", name: "Test Applicant", approval: "pending", online: false,
-    vehicle: { registration: "TEST-TRICYCLE-2", approval: "pending", capacity: 3, capacityVerified: false } });
+  riders.set("test-rider", { userId: "test-rider", name: "Test Rider", approval: "approved", online: false, lastSeenAt: null,
+    vehicle: { registration: "TEST-TRICYCLE-1", approval: "approved", capacity: 3, capacityVerified: true, capacityDeclared: false } });
+  riders.set("test-rider-pending", { userId: "test-rider-pending", name: "Test Applicant", approval: "pending", online: false, lastSeenAt: null,
+    vehicle: { registration: "TEST-TRICYCLE-2", approval: "pending", capacity: 3, capacityVerified: false, capacityDeclared: false } });
   // TEST-ONLY square around (0,0). Not real campus coordinates.
   return { locs, rides: [], riders, seq: 1, boundary: [[-1, -1], [-1, 1], [1, 1], [1, -1]] };
 }
@@ -82,7 +82,7 @@ class MemoryRepo implements Repo {
       riderId: null, riderName: null, vehicleReg: null,
       pickup: { ...n.pickup, label: pick ? pick.name : "GPS pin" },
       destination: { id: dest.id, name: dest.name },
-      fareKobo: n.fareKobo, currency: "NGN", passengerCount: n.passengerCount, paymentMethod: n.paymentMethod, paymentStatus: "outstanding",
+      fareKobo: n.fareKobo, currency: "NGN", passengerCount: n.passengerCount, farePerPassengerKobo: Math.round(n.fareKobo / n.passengerCount), paymentMethod: n.paymentMethod, paymentStatus: "outstanding",
       status: "searching", requestedAt: new Date().toISOString(), cancellationReason: null, _k: n.idempotencyKey,
     };
     S().rides.unshift(ride); return clone(ride);
@@ -119,26 +119,35 @@ class MemoryRepo implements Repo {
     const r = S().rides.find((x) => x.id === rideId)!; r.paymentStatus = "collected"; return clone(r);
   }
   async getRider(id: string) { const r = S().riders.get(id); return r ? clone(r) : null; }
-  async applyRider(actorId: string, reg?: string) {
+  async applyRider(actorId: string, reg: string | undefined, seats: number) {
     const existing = S().riders.get(actorId);
     if (existing) return clone(existing);
-    const info: RiderInfo = { userId: actorId, name: nameOf(actorId), approval: "pending", online: false,
-      vehicle: { registration: reg ?? null, approval: "pending", capacity: 3, capacityVerified: false } };
+    const info: RiderInfo = { userId: actorId, name: nameOf(actorId), approval: "pending", online: false, lastSeenAt: null,
+      vehicle: { registration: reg ?? null, approval: "pending", capacity: seats, capacityVerified: false, capacityDeclared: true } };
     S().riders.set(actorId, info); return clone(info);
   }
-  async setOnline(id: string, online: boolean) { const r = S().riders.get(id); if (r) r.online = online; }
+  async setOnline(id: string, online: boolean) { const r = S().riders.get(id); if (r) { r.online = online; r.lastSeenAt = new Date().toISOString(); } }
+  async touchRider(id: string) { const r = S().riders.get(id); if (r) r.lastSeenAt = new Date().toISOString(); }
+  async maxVerifiedCapacity() {
+    const caps = [...S().riders.values()].filter((r) => r.vehicle?.approval === "approved" && r.vehicle.capacityVerified).map((r) => r.vehicle!.capacity);
+    return caps.length ? Math.max(...caps) : null;
+  }
+  /** Test helper: a rider whose vehicle record is missing (incomplete profile). */
+  removeVehicle(id: string) { const r = S().riders.get(id); if (r) r.vehicle = null; }
+  /** Test helper: pretend the last heartbeat was this many seconds ago. */
+  ageHeartbeat(id: string, seconds: number) { const r = S().riders.get(id); if (r) r.lastSeenAt = new Date(Date.now() - seconds * 1000).toISOString(); }
   async listRiders() { return clone([...S().riders.values()]); }
-  async setVehicleCapacity(riderId: string, capacity: number) {
+  async setVehicleCapacity(riderId: string, capacity: number, _adminId?: string) {
     const r = S().riders.get(riderId); if (!r?.vehicle) throw new ApiError(404, "NOT_FOUND", "Rider not found.");
     r.vehicle.capacity = capacity; r.vehicle.capacityVerified = true; return clone(r);
   }
-  async setRiderApproval(id: string, status: RiderApproval) {
+  async setRiderApproval(id: string, status: RiderApproval, _adminId?: string) {
     const r = S().riders.get(id);
     if (!r) throw new ApiError(404, "NOT_FOUND", "Rider not found.");
     r.approval = status; if (status !== "approved") r.online = false;
-    if (r.vehicle) r.vehicle.approval = status === "approved" ? "approved" : status === "pending" ? "pending" : "rejected";
+    if (r.vehicle) { r.vehicle.approval = status === "approved" ? "approved" : status === "pending" ? "pending" : "rejected"; if (status === "approved" && r.vehicle.capacityDeclared) r.vehicle.capacityVerified = true; }
     return clone(r);
   }
 }
 let inst: MemoryRepo | undefined;
-export const getMemoryRepo = (): Repo => (inst ??= new MemoryRepo());
+export const getMemoryRepo = (): MemoryRepo => (inst ??= new MemoryRepo());

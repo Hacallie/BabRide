@@ -73,7 +73,7 @@ function Row({ l, reload, onError }: { l: Loc; reload: () => Promise<void>; onEr
               <input type="checkbox" className="mt-1" checked={ok} onChange={(e) => setOk(e.target.checked)} />
               <span>This landmark is <b>ground verified</b>. Moving it removes that verification and it will need checking again.</span>
             </label>)}
-          <LocationPicker value={pick} onChange={setPick} idPrefix={id} />
+          <LocationPicker value={pick} onChange={setPick} idPrefix={id} initialQuery={l.name} />
           <div className="flex gap-2">
             <button type="button" className={btnPrimary} disabled={busy || !pick || (l.status === "verified" && !ok)} onClick={savePosition}>{busy ? "Saving…" : "Save location"}</button>
             <button type="button" className={btnGhost} onClick={close}>Cancel</button>
@@ -120,6 +120,7 @@ export default function LandmarksAdmin({ locs, reload, onError }: { locs: Loc[];
     finally { setBusy(false); }
   }
   const active = locs.filter((l) => l.active), inactive = locs.filter((l) => !l.active);
+  const needPosition = active.filter((l) => l.status === "placeholder");
   return (
     <div className="space-y-4">
       <form onSubmit={add} noValidate className={`${card} space-y-3`}>
@@ -140,6 +141,11 @@ export default function LandmarksAdmin({ locs, reload, onError }: { locs: Loc[];
         <p className="text-xs text-navy-700">A landmark becomes “Ground verified” only when you confirm it on the spot, from the list below. Adding one never needs your own location or a ride pickup.</p>
       </form>
 
+      {needPosition.length > 0 && (
+        <div role="status" className="rounded-xl2 border border-gold/60 bg-amber-50 p-4 text-sm text-navy-900">
+          <p className="font-semibold">{needPosition.length} landmark{needPosition.length === 1 ? "" : "s"} still need a map position</p>
+          <p className="mt-1">{needPosition.map((l) => l.name).join(", ")}. Students can't book to or from {needPosition.length === 1 ? "it" : "them"} until you press <b>Set location</b> below. Each one is a one-time job: once saved, it works for booking straight away.</p>
+        </div>)}
       {locs.length === 0 ? <p>No landmarks yet.</p> : <ul className="space-y-2">{active.map((l) => <Row key={`${l.id}-${l.name}-${l.description}-${l.pickupAllowed}-${l.destinationAllowed}`} l={l} reload={reload} onError={onError} />)}</ul>}
       {inactive.length > 0 && (<><h3 className="pt-2 text-lg font-bold">Deactivated</h3><ul className="space-y-2">{inactive.map((l) => <Row key={`${l.id}-off`} l={l} reload={reload} onError={onError} />)}</ul></>)}
     </div>

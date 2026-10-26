@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { quoteFare, pointInPolygon, FIXED_FARE_KOBO } from "@/lib/fare";
+import { quoteFare, pointInPolygon, FIXED_FARE_KOBO, totalFareKobo } from "@/lib/fare";
 
 // TEST-ONLY square. NOT real Babcock coordinates.
 const square: [number, number][] = [[0,0],[0,10],[10,10],[10,0]];
@@ -30,4 +30,14 @@ describe("fare engine", () => {
     expect(pointInPolygon({latitude:5,longitude:5},square)).toBe(true);
     expect(pointInPolygon({latitude:15,longitude:5},square)).toBe(false);
   });
+});
+
+describe("per-passenger total", () => {
+  it("is 20000 kobo x passengers: 1 = ₦200, 2 = ₦400, 3 = ₦600, 4 = ₦800", () => {
+    expect([1, 2, 3, 4].map((n) => totalFareKobo(n))).toEqual([20000, 40000, 60000, 80000]);
+  });
+  it("refuses zero, negative, fractional and non-numeric passenger counts", () => {
+    for (const bad of [0, -1, 2.5, NaN, Infinity]) expect(() => totalFareKobo(bad)).toThrow();
+  });
+  it("refuses a tampered per-passenger fare", () => { expect(() => totalFareKobo(2, 5000)).toThrow(); });
 });
