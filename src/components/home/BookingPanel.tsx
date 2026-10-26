@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ClientApiError, uid } from "@/lib/client-api";
-import { FIXED_FARE_KOBO, formatNaira } from "@/lib/fare";
+import { FIXED_FARE_KOBO, formatNaira, totalFareKobo } from "@/lib/fare";
 import { STATUS_LABEL } from "@/components/StatusBadge";
 import type { Ride } from "@/lib/types";
 import PassengerPicker from "@/components/PassengerPicker";
@@ -43,13 +43,23 @@ export default function BookingPanel() {
     return null;
   }
 
-  function useLocation() {
+  // "Use my location" picks the NEAREST located campus landmark (the server does the matching and returns only ids and names).
+  function locateMe() {
     setGpsMsg(null);
     if (!("geolocation" in navigator)) return setGpsMsg("Location isn't available on this device. Choose a landmark instead.");
-    setGpsMsg("Getting your location…");
+    setGpsMsg("Finding where you are…");
     navigator.geolocation.getCurrentPosition(
-      (p) => { setGps({ latitude: p.coords.latitude, longitude: p.coords.longitude, acc: Math.round(p.coords.accuracy) }); setPickupId(""); setGpsMsg(null); },
-      () => setGpsMsg("Location permission was denied or unavailable. Choose a landmark instead."),
+      async (p) => {
+        try {
+          const r = await api<{ match: { id: string; name: string; distanceMeters: number } | null; nearby: { id: string; name: string; distanceMeters: number }[]; reason: string; maxMeters: number }>(
+            "/api/v1/campus/nearest", { method: "POST", body: { latitude: p.coords.latitude, longitude: p.coords.longitude } });
+          if (r.match) { setPickupId(r.match.id); setGps(null); setFieldErr(null); setGpsMsg(`Pickup set to ${r.match.name} (about ${r.match.distanceMeters} m away). Not right? Choose another.`); }
+          else if (r.reason === "outside_campus") setGpsMsg("You seem to be outside the campus. Choose a landmark instead.");
+          else if (r.reason === "too_far") setGpsMsg(`No landmark is within ${r.maxMeters} m of you. The nearest: ${r.nearby.map((n) => `${n.name} (${n.distanceMeters} m)`).join(", ")}. Choose one from the list.`);
+          else setGpsMsg("No landmarks have a map position yet. Choose one from the list.");
+        } catch (e) { setGpsMsg(e instanceof Error ? e.message : "Couldn't use your location. Choose a landmark instead."); }
+      },
+      (e) => setGpsMsg(e.code === 1 ? "Location permission was denied. Choose a landmark instead." : e.code === 3 ? "Finding you took too long. Try again, or choose a landmark." : "Your location isn't available. Choose a landmark instead."),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 });
   }
 
@@ -83,7 +93,7 @@ export default function BookingPanel() {
         <p className="text-sm font-medium text-mist">Ride requested</p>
         <h2 className="mt-1 text-2xl font-bold">{STATUS_LABEL[r.status]}</h2>
         <p className="mt-3 text-white">{r.pickup.label} → {r.destination.name}</p>
-        <p className="mt-1 text-mist">Fare {formatNaira(r.fareKobo)} for the whole ride · {r.passengerCount} {r.passengerCount === 1 ? "passenger" : "passengers"} · pay cash to the rider</p>
+        <p className="mt-1 text-mist">Total {formatNaira(r.fareKobo)} ({r.passengerCount} {r.passengerCount === 1 ? "passenger" : "passengers"} × {formatNaira(r.farePerPassengerKobo)}) · pay cash to the rider</p>
         <Link href="/student" className="mt-5 inline-flex min-h-[48px] w-full items-center justify-center rounded-xl bg-royal px-5 font-semibold text-white hover:bg-[#1d4fc7]">Track this ride</Link>
       </section>
     );
@@ -103,7 +113,7 @@ export default function BookingPanel() {
         <div className="flex items-center gap-2 pl-[18px]">
           <span aria-hidden="true" className="h-6 border-l-2 border-dashed border-white/30" />
           <button type="button" onClick={swap} disabled={!!gps} aria-label="Swap pickup and destination" className="rounded-lg border border-white/15 px-2.5 py-1 text-xs font-medium text-mist transition hover:bg-white/10 disabled:opacity-40">Swap</button>
-          <button type="button" onClick={useLocation} className="rounded-lg border border-white/15 px-2.5 py-1 text-xs font-medium text-mist transition hover:bg-white/10">Use current location</button>
+          <button type="button" onClick={locateMe} className="rounded-lg border border-white/15 px-2.5 py-1 text-xs font-medium text-mist transition hover:bg-white/10">Use current location</button>
         </div>
         {gpsMsg && <p role="status" className="text-sm text-mist">{gpsMsg}</p>}
         <LandmarkPicker label="Destination" tone="destination" options={lms.filter((l) => l.destinationAllowed)} value={destId} loading={loading}
@@ -117,10 +127,10 @@ export default function BookingPanel() {
 
       <div className="mt-4 flex items-end justify-between rounded-xl border border-white/12 bg-white/5 p-4">
         <div>
-          <p className="text-xs uppercase tracking-wide text-mist">Fare</p>
-          <p className="text-3xl font-extrabold leading-none">{formatNaira(FIXED_FARE_KOBO)}</p>
+          <p className="text-xs uppercase tracking-wide text-mist">Total fare</p>
+          <p className="text-3xl font-extrabold leading-none tabular-nums">{formatNaira(totalFareKobo(passengers))}</p>
         </div>
-        <p className="max-w-[11rem] text-right text-xs text-mist">per ride, whatever the distance or group size. The server confirms the fare.</p>
+        <p className="max-w-[12rem] text-right text-xs text-mist">{formatNaira(FIXED_FARE_KOBO)} per passenger × {passengers} {passengers === 1 ? "passenger" : "passengers"}, whatever the distance. The server confirms it when you book.</p>
       </div>
 
       <fieldset className="mt-4">

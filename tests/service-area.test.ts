@@ -57,7 +57,8 @@ describe("landmarks mode (opt-in)", () => {
     await expect(quote(repo, { latitude: 6.9, longitude: 3.7 }, "loc-2")).rejects.toMatchObject({ code: "BOUNDARY_NOT_CONFIGURED" });
   });
   it("when a polygon exists and both landmarks are located, geometry wins: outside means refused", async () => {
-    const far = await adminAddLocation(repo, admin, addLocationSchema.parse({ name: "Far away", latitude: 50, longitude: 50, source: "map" }));
+    // The service refuses to SAVE an out-of-campus landmark, so insert the far one straight into the test repo.
+    const far = await repo.addLocation({ name: "Far away", description: "", latitude: 50, longitude: 50, source: "map", pickupAllowed: true, destinationAllowed: true }, "t");
     const near = await adminAddLocation(repo, admin, addLocationSchema.parse({ name: "Near", latitude: 0.2, longitude: 0.2, source: "map" }));
     await expect(quote(repo, { locationId: far.id }, near.id)).rejects.toMatchObject({ code: "PICKUP_OUT_OF_AREA" });
     expect((await quote(repo, { locationId: near.id }, "loc-2")).fareKobo).toBe(20000);

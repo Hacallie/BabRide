@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { api, ClientApiError } from "@/lib/client-api";
 import { homeFor } from "@/lib/auth-utils";
-import { browserSupabase } from "@/lib/supabase-browser";
+import { signOutEverywhere } from "@/lib/sign-out";
 import { btnAccent, btnGlass, glassPanel } from "@/components/ui";
 import type { Actor, Role, RiderInfo } from "@/lib/types";
 
@@ -51,8 +51,7 @@ export default function Gate({ allow, title, signInHref = "/login", deniedAction
   useEffect(() => { void load(); }, [load]);
 
   async function signOut() {
-    try { await browserSupabase()?.auth.signOut(); } catch { /* ignore: we leave the page either way */ }
-    window.location.assign("/login");
+    await signOutEverywhere(st.s === "ready" || st.s === "denied" ? st.me.actor.role : undefined); // riders are set offline first
   }
 
   if (st.s === "loading") return (

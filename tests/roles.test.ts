@@ -10,16 +10,16 @@ beforeEach(() => resetMemoryStore());
 
 describe("role escalation", () => {
   it("ignores a client-sent role when applying to be a rider", () => {
-    const parsed = riderApplySchema.parse({ role: "admin", vehicleRegistration: "ab123", account_status: "active" });
-    expect(Object.keys(parsed)).toEqual(["vehicleRegistration"]);
+    const parsed = riderApplySchema.parse({ role: "admin", vehicleRegistration: "ab123", account_status: "active", passengerSeats: 3 });
+    expect(Object.keys(parsed).sort()).toEqual(["passengerSeats", "vehicleRegistration"]) // role / account_status are stripped;
   });
   it("applying makes a PENDING rider; it never approves or creates an admin", async () => {
-    const r = await riderApply(repo, other, undefined);
+    const r = await riderApply(repo, other, undefined, 3);
     expect(r).toMatchObject({ approval: "pending", online: false });
     expect(r.vehicle).toMatchObject({ approval: "pending" });
   });
   it("an administrator cannot apply as a rider", async () => {
-    await expect(riderApply(repo, admin, undefined)).rejects.toMatchObject({ status: 403 });
+    await expect(riderApply(repo, admin, undefined, 3)).rejects.toMatchObject({ status: 403 });
   });
   it("students and riders cannot use admin operations", async () => {
     for (const who of [student, rider])
@@ -36,13 +36,13 @@ describe("role escalation", () => {
 
 describe("keke number is optional", () => {
   it("accepts an empty body, an empty string or a number", () => {
-    expect(riderApplySchema.parse({}).vehicleRegistration).toBeUndefined();
-    expect(riderApplySchema.parse({ vehicleRegistration: "   " }).vehicleRegistration).toBeUndefined();
-    expect(riderApplySchema.parse({ vehicleRegistration: "ab-123" }).vehicleRegistration).toBe("ab-123");
-    expect(riderApplySchema.safeParse({ vehicleRegistration: "x" }).success).toBe(false);
+    expect(riderApplySchema.parse({ passengerSeats: 3 }).vehicleRegistration).toBeUndefined();
+    expect(riderApplySchema.parse({ vehicleRegistration: "   ", passengerSeats: 3 }).vehicleRegistration).toBeUndefined();
+    expect(riderApplySchema.parse({ vehicleRegistration: "ab-123", passengerSeats: 3 }).vehicleRegistration).toBe("ab-123");
+    expect(riderApplySchema.safeParse({ vehicleRegistration: "x", passengerSeats: 3 }).success).toBe(false);
   });
   it("a rider without a number can still be approved", async () => {
-    await riderApply(repo, other, undefined);
+    await riderApply(repo, other, undefined, 3);
     await adminRiderAction(repo, admin, other.id, "approve");
     expect((await repo.getRider(other.id))?.vehicle).toMatchObject({ registration: null, approval: "approved" });
   });

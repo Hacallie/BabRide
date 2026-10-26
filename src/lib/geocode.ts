@@ -3,6 +3,8 @@
 // but its usage policy requires an identifying contact (GEOCODER_CONTACT) and light use. Swap in another provider
 // (e.g. Mapbox, with a SERVER-side token) by implementing GeocodeProvider.
 import { ApiError } from "@/lib/errors";
+import { pointInPolygon, type Boundary } from "@/lib/fare";
+import { distanceMeters } from "@/lib/map-plot";
 
 export interface GeoCandidate { label: string; latitude: number; longitude: number }
 export type GeocoderConfig = { provider: "none" } | { provider: "nominatim"; baseUrl: string; contact: string; viewbox: string | null; context: string };
@@ -52,8 +54,21 @@ async function queryProvider(cfg: Extract<GeocoderConfig, { provider: "nominatim
   } finally { clearTimeout(timer); }
 }
 
-/** Campus-first search: (1) the name with the campus as context, (2) inside the owner's viewbox if set, (3) plain, as a last resort. */
-export async function searchPlaces(q: string, env: Env = process.env, fetchImpl: typeof fetch = fetch): Promise<GeoCandidate[]> {
+export interface CampusScope { boundary: Boundary; anchors: { latitude: number; longitude: number }[]; maxMeters: number }
+/**
+ * Campus-only filter. With a real polygon: inside it. Without one: within maxMeters of a landmark that is already located.
+ * With neither (a brand-new install) nothing is known yet, so only the campus-first query and the optional viewbox apply.
+ */
+export function insideCampusScope(c: { latitude: number; longitude: number }, scope?: CampusScope): boolean {
+  if (!scope) return true;
+  if (scope.boundary) return pointInPolygon(c, scope.boundary);
+  if (scope.anchors.length) return scope.anchors.some((a) => distanceMeters({ lat: a.latitude, lng: a.longitude }, { lat: c.latitude, lng: c.longitude }) <= scope.maxMeters);
+  return true;
+}
+
+/** Campus-first search: (1) the name with the campus as context, (2) inside the owner's viewbox if set, (3) plain, as a last resort.
+ *  Results outside the campus scope are dropped (and counted) so an unrelated place can never be picked. */
+export async function searchPlacesDetailed(q: string, env: Env = process.env, fetchImpl: typeof fetch = fetch, scope?: CampusScope): Promise<{ candidates: GeoCandidate[]; filteredOut: number }> {
   const cfg = geocoderConfig(env);
   if (cfg.provider === "none")
     throw new ApiError(503, "GEOCODER_NOT_CONFIGURED", "Place search isn't set up on this server. You can still use your current GPS position.");
@@ -61,16 +76,20 @@ export async function searchPlaces(q: string, env: Env = process.env, fetchImpl:
     const attempts: [string, boolean][] = [[`${q}, ${cfg.context}`, false]];
     if (cfg.viewbox) attempts.push([q, true]);
     attempts.push([q, false]);
-    const seen = new Set<string>(); const out: GeoCandidate[] = [];
+    const seen = new Set<string>(); const out: GeoCandidate[] = []; let filteredOut = 0;
     for (const [query, bounded] of attempts) {
       for (const c of await queryProvider(cfg, query, bounded, fetchImpl)) {
         const k = `${c.latitude.toFixed(5)},${c.longitude.toFixed(5)}`;
-        if (!seen.has(k)) { seen.add(k); out.push(c); }
+        if (seen.has(k)) continue; seen.add(k);
+        if (insideCampusScope(c, scope)) out.push(c); else filteredOut++;
       }
-      if (out.length >= 3) break; // enough campus-first results; spare the provider
+      if (out.length >= 3) break; // enough campus results: spare the provider
     }
-    return out.slice(0, 6);
+    return { candidates: out.slice(0, 6), filteredOut };
   } catch {
     throw new ApiError(502, "GEOCODER_FAILED", "Place search is unavailable right now. Try again, or use your current GPS position.");
   }
+}
+export async function searchPlaces(q: string, env: Env = process.env, fetchImpl: typeof fetch = fetch, scope?: CampusScope): Promise<GeoCandidate[]> {
+  return (await searchPlacesDetailed(q, env, fetchImpl, scope)).candidates;
 }

@@ -11,6 +11,7 @@ import {
   nameProblem, normalizeEmail, passwordProblem, safeNext,
 } from "@/lib/auth-utils";
 import { browserSupabase } from "@/lib/supabase-browser";
+import { startRiderSession } from "@/lib/rider-session";
 import type { Role } from "@/lib/types";
 
 type View = "signin" | "signup";
@@ -72,6 +73,8 @@ export default function AuthPanel({ initialView = "signin", switchHrefs, heading
   const finish = useCallback(async () => {
     try {
       const me = await api<Me>("/api/v1/me");
+      // A rider who just signed in is set online by the server (approved riders only). A failure here never blocks sign-in.
+      if (me.actor.role === "rider") await startRiderSession();
       let dest = next.current;
       try { dest = safeNext(sessionStorage.getItem(NEXT_KEY)) ?? dest; sessionStorage.removeItem(NEXT_KEY); } catch { /* ignore */ }
       if (onSignedIn) { submitting.current = false; setBusy(false); onSignedIn(); return; }

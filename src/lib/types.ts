@@ -24,8 +24,8 @@ export interface Ride {
   pickup: { latitude: number | null; longitude: number | null; locationId: string | null; label: string };
   destination: { id: string; name: string };
   fareKobo: number; currency: string;
-  /** Number of people travelling. The fare is per ride, not per passenger. */
-  passengerCount: number;
+  /** Number of people travelling. fareKobo is the TOTAL: farePerPassengerKobo x passengerCount. */
+  passengerCount: number; farePerPassengerKobo: number;
   paymentMethod: "cash" | "electronic"; paymentStatus: PaymentStatus;
   status: RideStatus; requestedAt: string; cancellationReason: string | null;
 }
@@ -33,6 +33,8 @@ export interface Ride {
 export type RiderApproval = "pending" | "approved" | "rejected" | "suspended";
 export interface RiderInfo {
   userId: string; name: string; approval: RiderApproval; online: boolean;
+  /** Last heartbeat. "online" only counts while this is recent (see riderStaleSeconds). */
+  lastSeenAt: string | null;
   /** capacity is the number of seats; capacityVerified is true only after an administrator confirmed it. */
-  vehicle: { registration: string | null; approval: "pending" | "approved" | "rejected"; capacity: number; capacityVerified: boolean } | null;
+  vehicle: { registration: string | null; approval: "pending" | "approved" | "rejected"; capacity: number; capacityVerified: boolean; capacityDeclared: boolean } | null;
 }

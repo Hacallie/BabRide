@@ -44,8 +44,13 @@ export interface Repo {
   acceptRide(rideId: string, riderId: string): Promise<Ride>;
   markCashCollected(rideId: string): Promise<Ride>;
   getRider(id: string): Promise<RiderInfo | null>;
-  applyRider(actorId: string, vehicleRegistration?: string): Promise<RiderInfo>;
+  /** Seats = passenger seats the rider declares (the driver is not counted). */
+  applyRider(actorId: string, vehicleRegistration: string | undefined, seats: number): Promise<RiderInfo>;
   setOnline(id: string, online: boolean): Promise<void>;
+  /** Heartbeat: refreshes last_seen_at without changing the online flag. */
+  touchRider(id: string): Promise<void>;
+  /** Largest administrator-confirmed seat capacity among approved vehicles, or null if none is confirmed yet. */
+  maxVerifiedCapacity(): Promise<number | null>;
   listRiders(): Promise<RiderInfo[]>;
   setRiderApproval(id: string, status: RiderApproval, adminId: string): Promise<RiderInfo>;
   /** Records an administrator-confirmed seat capacity for the rider's vehicle. */

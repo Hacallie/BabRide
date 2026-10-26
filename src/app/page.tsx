@@ -8,7 +8,7 @@ import { FIXED_FARE_KOBO, formatNaira } from "@/lib/fare";
 const fare = formatNaira(FIXED_FARE_KOBO);
 const steps: [string, string][] = [
   ["Pick your spots", "Choose pickup and destination from campus landmarks, or share your current location."],
-  ["See the fare up front", `Every eligible ride is ${fare}, whatever the distance.`],
+  ["See the fare up front", `Every passenger pays ${fare}, whatever the distance.`],
   ["Get matched", "An approved rider accepts your request. You see their name and tricycle number."],
   ["Ride and pay", "Pay cash to the rider. Electronic payment is coming soon."],
 ];

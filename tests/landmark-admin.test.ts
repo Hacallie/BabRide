@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getMemoryRepo, resetMemoryStore } from "./helpers/memory-repo";
+import { getMemoryRepo, resetMemoryStore, setTestBoundary } from "./helpers/memory-repo";
 import { addLocationSchema, setLocationPositionSchema, updateLocationDetailsSchema } from "@/lib/schemas";
 import { adminAddLocation, adminSetLocationPosition, adminUpdateLocationDetails, adminVerifyLocation } from "@/lib/service";
 import { admin, rider, student } from "./helpers/ride-fixtures";
 
 const repo = getMemoryRepo();
 const point = { latitude: 6.8912, longitude: 3.7203, source: "search" as const };
-beforeEach(() => resetMemoryStore());
+beforeEach(() => { resetMemoryStore(); setTestBoundary(null); }); // polygon rules are tested in campus-search.test.ts
 
 describe("creating a landmark needs only a name (the reported bug)", () => {
   it("accepts a name alone: no pickup point, no GPS, no coordinates", () => {

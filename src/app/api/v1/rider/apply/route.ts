@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
 export const POST = handle(async (req) => {
   const body = await jsonBody(req);
 
-  const { vehicleRegistration } = parse(
+  // passengerSeats is REQUIRED: how many passengers the keke carries (the driver is not counted).
+  const { vehicleRegistration, passengerSeats } = parse(
     riderApplySchema,
     body ?? {},
   );
@@ -25,6 +26,7 @@ export const POST = handle(async (req) => {
       await getRepo(),
       await getActor(req),
       normalizedRegistration,
+      passengerSeats,
     ),
   };
 }, 201);

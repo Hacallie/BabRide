@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getMemoryRepo, resetMemoryStore } from "./helpers/memory-repo";
+import { getMemoryRepo, resetMemoryStore, setTestBoundary } from "./helpers/memory-repo";
 import { addLocationSchema, geocodeQuerySchema, setLocationPositionSchema, verifyLocationSchema } from "@/lib/schemas";
 import { adminAddLocation, adminSetLocationPosition, adminVerifyLocation, createRide } from "@/lib/service";
 import { geocoderConfig, parseNominatim, searchPlaces } from "@/lib/geocode";
@@ -39,6 +39,9 @@ describe("landmark input", () => {
 });
 
 describe("landmark creation and verification rules", () => {
+  // These tests are about landmark rules, not the polygon: clear the test polygon so real-looking points are accepted.
+  // (The campus-only rule has its own tests in campus-search.test.ts.)
+  beforeEach(() => setTestBoundary(null));
   it("only an administrator can add, move or verify", async () => {
     const input = addLocationSchema.parse({ name: "Library", ...point });
     for (const who of [student, rider, null]) {
