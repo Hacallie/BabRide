@@ -1,5 +1,12 @@
 /** Server-side fare engine. The client never supplies a fare. */
-export const FIXED_FARE_KOBO = 20000; // ₦200
+export const FIXED_FARE_KOBO = 20000; // ₦200 PER PASSENGER (name kept for existing imports)
+export const FARE_PER_PASSENGER_KOBO = FIXED_FARE_KOBO;
+
+/** Total = ₦200 x passengers, in kobo. Throws on anything that is not a positive whole number. Callers validate the upper limit. */
+export function totalFareKobo(passengers: number): number {
+  if (!Number.isInteger(passengers) || passengers < 1) throw new RangeError("Passengers must be a positive whole number.");
+  return FARE_PER_PASSENGER_KOBO * passengers;
+}
 export const CURRENCY = "NGN" as const;
 
 export type LngLat = [number, number]; // [lng, lat]
@@ -49,7 +56,7 @@ export function quoteFare(pickup: Point, destination: Point, cfg: QuoteConfig): 
     if (!pointInPolygon(destination, cfg.boundary))
       return { ok: false, code: "DESTINATION_OUT_OF_AREA", message: "Destination is outside the campus service area." };
   }
-  // Distance never changes the fare. Configured fare must match the v1 fixed value.
+  // Distance never changes the fare. This is the PER-PASSENGER fare; the service multiplies it by the passenger count.
   const fare = cfg.fareKobo ?? FIXED_FARE_KOBO;
   if (fare !== FIXED_FARE_KOBO) throw new Error("Institution fare differs from the validated fixed fare");
   return { ok: true, fareKobo: fare, currency: CURRENCY };

@@ -25,11 +25,25 @@ export const quoteQuerySchema = z.object({
   latitude: optCoord(coord.latitude), longitude: optCoord(coord.longitude),
   locationId: z.string().min(1).max(100).optional(),
   destinationLocationId: z.string().min(1).max(100),
+  passengerCount: z.preprocess((v) => (v === undefined || v === "" ? 1 : v), passengerCountSchema).default(1),
 });
 // The tricycle registration ("keke number") is optional. Unknown keys such as "role" are stripped, never trusted.
 const optionalReg = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().min(3).max(20).optional());
+// Seat capacity is REQUIRED: the number of passengers the keke can legally and safely carry, driver NOT counted.
+// Hard ceiling 8 here (the database limit); the configurable limit (BABRIDE_MAX_VEHICLE_SEATS) is enforced in the service.
+export const seatCapacitySchema = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.coerce.number({ required_error: "Enter the number of passenger seats.", invalid_type_error: "Enter the number of passenger seats." })
+    .int("Seats must be a whole number.").min(1, "Enter at least 1 passenger seat.").max(8, "That is more seats than any keke has."));
 export const riderApplySchema = z.object({ vehicleRegistration: optionalReg });
 export const availabilitySchema = z.object({ online: z.boolean() });
+export const nearestQuerySchema = z.object({
+  latitude: z.coerce.number().min(-90).max(90), longitude: z.coerce.number().min(-180).max(180),
+  accuracy: z.preprocess((v) => (v === undefined || v === "" || v === null ? undefined : v), z.coerce.number().min(0).max(1_000_000).optional()),
+});
+export const campusSearchSchema = z.object({
+  q: z.string().trim().min(2, "Type at least 2 characters.").max(60),
+  purpose: z.enum(["pickup", "destination"]).optional(),
+});
 
 // Landmarks. The admin supplies a NAME and picks a point; coordinates come from the picker, never from typing.
 // There is deliberately no "verified" field: unknown keys are stripped, so a client cannot mark a location ground verified.

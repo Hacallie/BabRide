@@ -23,8 +23,9 @@ export interface Ride {
   /** latitude/longitude are null when the pickup is a landmark that has no map position yet. */
   pickup: { latitude: number | null; longitude: number | null; locationId: string | null; label: string };
   destination: { id: string; name: string };
-  fareKobo: number; currency: string;
-  /** Number of people travelling. The fare is per ride, not per passenger. */
+  /** TOTAL fare = farePerPassengerKobo x passengerCount (computed on the server). Rides created before per-passenger pricing keep their old per-ride total. */
+  fareKobo: number; farePerPassengerKobo: number; currency: string;
+  /** Number of people travelling (the driver is not counted). */
   passengerCount: number;
   paymentMethod: "cash" | "electronic"; paymentStatus: PaymentStatus;
   status: RideStatus; requestedAt: string; cancellationReason: string | null;
@@ -33,6 +34,7 @@ export interface Ride {
 export type RiderApproval = "pending" | "approved" | "rejected" | "suspended";
 export interface RiderInfo {
   userId: string; name: string; approval: RiderApproval; online: boolean;
-  /** capacity is the number of seats; capacityVerified is true only after an administrator confirmed it. */
+  /** `online` is EFFECTIVE presence: the stored flag AND a recent heartbeat.
+   *  capacity = passenger seats (driver excluded). capacityVerified = the capacity was explicitly declared by the rider at registration or set by an administrator (the old database default of 3 is not trusted). */
   vehicle: { registration: string | null; approval: "pending" | "approved" | "rejected"; capacity: number; capacityVerified: boolean } | null;
 }

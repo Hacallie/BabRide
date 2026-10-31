@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import Gate from "@/components/Gate";
 import StatusBadge from "@/components/StatusBadge";
 import { api } from "@/lib/client-api";
+import { RIDER_STATUS_EVENT, autoOnlinePending, startRiderSession } from "@/lib/client-session";
 import { formatNaira } from "@/lib/fare";
 import { btnAccent, btnDanger, btnGhost, btnPrimary, card } from "@/components/ui";
 import type { Ride, RiderInfo } from "@/lib/types";
@@ -12,7 +13,7 @@ const POLL_MS = 5000;
 function fitNote(info: RiderInfo, passengers: number): string | null {
   if (passengers <= 1) return null;
   const v = info.vehicle;
-  if (!v?.capacityVerified) return "Your seat capacity isn't confirmed yet. Ask an administrator, then you can take groups.";
+  if (!v?.capacityVerified) return "Your seat capacity isn't recorded yet. Ask an administrator to set it, then you can take groups.";
   if (v.capacity < passengers) return `Too many passengers: your vehicle seats ${v.capacity}.`;
   return null;
 }
@@ -28,34 +29,37 @@ const NEXT: Record<string, { action: string; text: string }> = {
 function Dashboard() {
   const [feed, setFeed] = useState<Feed | null>(null); const [err, setErr] = useState<string | null>(null); const [busy, setBusy] = useState(false);
   const load = useCallback(async () => { try { setFeed(await api<Feed>("/api/v1/rider/requests")); } catch (e) { setErr(e instanceof Error ? e.message : "Connection problem."); } }, []);
-  useEffect(() => { void load(); const t = setInterval(() => { if (document.visibilityState === "visible") void load(); }, POLL_MS); return () => clearInterval(t); }, [load]);
+  // If the automatic "go online" at sign-in failed (network), retry once here, then show the real state.
+  useEffect(() => { void (async () => { if (autoOnlinePending()) await startRiderSession(); await load(); })(); const t = setInterval(() => { if (document.visibilityState === "visible") void load(); }, POLL_MS); return () => clearInterval(t); }, [load]);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true); setErr(null);
     try { await fn(); } catch (e) { setErr(e instanceof Error ? e.message : "Action failed."); } finally { setBusy(false); await load(); }
   }
+  useEffect(() => { if (feed?.rider) window.dispatchEvent(new CustomEvent(RIDER_STATUS_EVENT, { detail: feed.rider.online })); }, [feed?.rider?.online]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!feed) return <p className="p-8 text-center" role="status">{err ?? "Loading…"}</p>;
   const info = feed.rider;
-  if (!info || info.approval !== "approved") {
-    return <div className={`${card} my-6`}><h1 className="text-2xl font-bold">Rider status: {info?.approval ?? "not applied"}</h1>
-      <p className="mt-2 text-navy-800">{info?.approval === "pending" ? "Your application is waiting for administrator approval. You'll be able to go online once approved." : "Your rider account cannot accept rides."}</p></div>;
+  if (!info) {
+    return <div className={`${card} my-6`}><h1 className="text-2xl font-bold">Rider account unavailable</h1>
+      <p className="mt-2 text-navy-800">We could not find your rider account.</p></div>;
   }
   const a = feed.active;
   return (
     <div className="space-y-5 py-6">
       <div className="flex items-center justify-between gap-3">
-        <div><h1 className="text-3xl font-extrabold text-navy-900">Rider</h1><p className="text-sm text-navy-800">{info.name}{info.vehicle?.registration ? ` · ${info.vehicle.registration}` : ""}</p></div>
+        <div><h1 className="text-3xl font-extrabold text-navy-900">Rider</h1><p className="text-sm text-navy-800">{info.name}{info.vehicle?.registration ? ` · ${info.vehicle.registration}` : ""}{info.vehicle ? ` · ${info.vehicle.capacity} passenger seats` : ""}</p></div>
         <button disabled={busy || !!a} aria-pressed={info.online} onClick={() => run(() => api("/api/v1/rider/availability", { method: "POST", body: { online: !info.online } }))}
           className={`${info.online ? btnAccent : btnGhost}`}>{info.online ? "Online · tap to go offline" : "Offline · go online"}</button>
       </div>
       {err && <p role="alert" className="rounded-xl bg-red-50 p-3 text-red-800">{err}</p>}
+      {!info.online && !a && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-navy-900">You're offline, so you won't get requests. You go online automatically when you sign in; if that didn't happen, tap the button above.</p>}
 
       {a && (
         <section className={card} aria-live="polite">
           <div className="flex items-center justify-between"><StatusBadge status={a.status} /></div>
           <p className="mt-3 font-semibold">{a.pickup.label} → {a.destination.name}</p>
           <p className="text-2xl font-extrabold">{formatNaira(a.fareKobo)} <span className="text-base font-medium">· {a.paymentMethod}</span></p>
-          <p className="text-sm text-navy-800">Passenger: {a.studentName} · <b>{a.passengerCount} {a.passengerCount === 1 ? "person" : "people"}</b></p>
+          <p className="text-sm text-navy-800">Passenger: {a.studentName} · <b>{a.passengerCount} {a.passengerCount === 1 ? "person" : "people"}</b> × {formatNaira(a.farePerPassengerKobo)}</p>
           {NEXT[a.status] && <button disabled={busy} onClick={() => run(() => api(`/api/v1/rides/${a.id}/${NEXT[a.status]!.action}`, { method: "POST" }))} className={`${btnPrimary} mt-4 w-full`}>{NEXT[a.status]!.text}</button>}
           {(a.status === "assigned" || a.status === "rider_arriving") && <button disabled={busy} onClick={() => run(() => api(`/api/v1/rides/${a.id}/release`, { method: "POST" }))} className={`${btnDanger} mt-2 w-full`}>Release this ride</button>}
         </section>
@@ -63,7 +67,7 @@ function Dashboard() {
 
       {!a && (
         <section aria-labelledby="req">
-          <h2 id="req" className="mb-2 text-xl font-bold">Incoming requests</h2>
+          <h2 id="req" className="mb-2 scroll-mt-20 text-xl font-bold">Incoming requests</h2>
           {!info.online ? <p className="text-navy-800">Go online to see ride requests.</p>
             : feed.requests.length === 0 ? <p className="text-navy-800">No requests right now. This page checks every few seconds.</p>
             : <ul className="space-y-3">{feed.requests.map((r) => (
@@ -78,7 +82,7 @@ function Dashboard() {
       )}
 
       <section aria-labelledby="rec">
-        <h2 id="rec" className="mb-2 text-xl font-bold">Recent trips</h2>
+        <h2 id="rec" className="mb-2 scroll-mt-20 text-xl font-bold">Recent trips</h2>
         {feed.recent.length === 0 ? <p className="text-navy-800">No trips yet.</p> : (
           <ul className="space-y-2">{feed.recent.map((r) => (
             <li key={r.id} className={`${card} !p-4`}>

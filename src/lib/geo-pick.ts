@@ -27,5 +27,5 @@ export const osmLargeUrl = (lat: number, lon: number): string =>
 
 export type LocStatusKey = "placeholder" | "selected" | "verified";
 export const STATUS_TEXT: Record<LocStatusKey, string> = {
-  placeholder: "Not located yet", selected: "Location selected (not ground verified)", verified: "Ground verified",
+  placeholder: "Needs location", selected: "Location selected (not ground verified)", verified: "Ground verified",
 };

@@ -10,16 +10,16 @@ beforeEach(() => resetMemoryStore());
 
 describe("role escalation", () => {
   it("ignores a client-sent role when applying to be a rider", () => {
-    const parsed = riderApplySchema.parse({ role: "admin", vehicleRegistration: "ab123", account_status: "active" });
-    expect(Object.keys(parsed)).toEqual(["vehicleRegistration"]);
+    const parsed = riderApplySchema.parse({ role: "admin", vehicleRegistration: "ab123", seatCapacity: 3, account_status: "active" });
+    expect(Object.keys(parsed).sort()).toEqual(["vehicleRegistration"]);
   });
-  it("applying makes a PENDING rider; it never approves or creates an admin", async () => {
-    const r = await riderApply(repo, other, undefined);
-    expect(r).toMatchObject({ approval: "pending", online: false });
-    expect(r.vehicle).toMatchObject({ approval: "pending" });
+  it("registration creates an approved rider; it never creates an admin", async () => {
+    const r = await riderApply(repo, other, {});
+    expect(r).toMatchObject({ approval: "approved", online: false });
+    expect(r.vehicle).toMatchObject({ approval: "approved" });
   });
   it("an administrator cannot apply as a rider", async () => {
-    await expect(riderApply(repo, admin, undefined)).rejects.toMatchObject({ status: 403 });
+    await expect(riderApply(repo, admin, {})).rejects.toMatchObject({ status: 403 });
   });
   it("students and riders cannot use admin operations", async () => {
     for (const who of [student, rider])
@@ -42,7 +42,7 @@ describe("keke number is optional", () => {
     expect(riderApplySchema.safeParse({ vehicleRegistration: "x" }).success).toBe(false);
   });
   it("a rider without a number can still be approved", async () => {
-    await riderApply(repo, other, undefined);
+    await riderApply(repo, other, {});
     await adminRiderAction(repo, admin, other.id, "approve");
     expect((await repo.getRider(other.id))?.vehicle).toMatchObject({ registration: null, approval: "approved" });
   });

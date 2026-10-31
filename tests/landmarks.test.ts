@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getMemoryRepo, resetMemoryStore } from "./helpers/memory-repo";
+import { getMemoryRepo, resetMemoryStore, setTestLocationPosition } from "./helpers/memory-repo";
 import { addLocationSchema, geocodeQuerySchema, setLocationPositionSchema, verifyLocationSchema } from "@/lib/schemas";
 import { adminAddLocation, adminSetLocationPosition, adminVerifyLocation, createRide } from "@/lib/service";
 import { geocoderConfig, parseNominatim, searchPlaces } from "@/lib/geocode";
@@ -7,7 +7,7 @@ import { nudge, validPoint } from "@/lib/geo-pick";
 import { admin, rider, student } from "./helpers/ride-fixtures";
 
 const repo = getMemoryRepo();
-const point = { latitude: 6.8912, longitude: 3.7203, source: "search" as const };
+const point = { latitude: 10.0305, longitude: 20.0305, source: "search" as const };
 beforeEach(() => resetMemoryStore());
 
 describe("landmark input", () => {
@@ -52,6 +52,7 @@ describe("landmark creation and verification rules", () => {
     expect(l).toMatchObject({ status: "selected", verified: false, source: "search" });
   });
   it("cannot verify a placeholder, then verifies after it is located", async () => {
+    setTestLocationPosition("loc-1", 0, 0, "placeholder"); // a landmark that really has no position
     await expect(adminVerifyLocation(repo, admin, "loc-1")).rejects.toMatchObject({ code: "NOT_LOCATED" });
     const moved = await adminSetLocationPosition(repo, admin, "loc-1", setLocationPositionSchema.parse(point));
     expect(moved).toMatchObject({ status: "selected", verified: false });
@@ -60,11 +61,11 @@ describe("landmark creation and verification rules", () => {
   it("never replaces verified coordinates without explicit confirmation", async () => {
     await adminSetLocationPosition(repo, admin, "loc-1", setLocationPositionSchema.parse(point));
     await adminVerifyLocation(repo, admin, "loc-1");
-    const other = { latitude: 6.9, longitude: 3.73, source: "search" as const };
+    const other = { latitude: 10.04, longitude: 20.04, source: "search" as const };
     await expect(adminSetLocationPosition(repo, admin, "loc-1", setLocationPositionSchema.parse(other))).rejects.toMatchObject({ code: "VERIFIED_LOCATION" });
-    expect((await repo.listLocations(true)).find((l) => l.id === "loc-1")).toMatchObject({ latitude: 6.8912, status: "verified" });
+    expect((await repo.listLocations(true)).find((l) => l.id === "loc-1")).toMatchObject({ latitude: 10.0305, status: "verified" });
     const after = await adminSetLocationPosition(repo, admin, "loc-1", setLocationPositionSchema.parse({ ...other, confirmReplaceVerified: true }));
-    expect(after).toMatchObject({ latitude: 6.9, status: "selected", verified: false });
+    expect(after).toMatchObject({ latitude: 10.04, status: "selected", verified: false });
   });
   it("404 for an unknown landmark", async () => {
     await expect(adminSetLocationPosition(repo, admin, "nope", setLocationPositionSchema.parse(point))).rejects.toMatchObject({ status: 404 });
@@ -74,7 +75,7 @@ describe("landmark creation and verification rules", () => {
 describe("landmark selection by name", () => {
   it("a student books by landmark id; the fare comes from the server's saved coordinates", async () => {
     const ride = await createRide(repo, student, { pickup: { latitude: 5, longitude: 5, locationId: "loc-1" }, destinationLocationId: "loc-2", paymentMethod: "cash", idempotencyKey: "landmark-key-1" });
-    expect(ride).toMatchObject({ fareKobo: 20000, pickup: { label: "CAF" }, destination: { name: "BUSA" } });
+    expect(ride).toMatchObject({ fareKobo: 20000, farePerPassengerKobo: 20000, passengerCount: 1, pickup: { label: "CAF" }, destination: { name: "BUSA" } });
   });
 });
 

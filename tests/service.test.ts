@@ -4,7 +4,7 @@ import { createRide, rideAction, listMyRides, getMyRide, adminRiderAction, rider
 import { admin, other, pending, rider, student } from "./helpers/ride-fixtures";
 
 const repo = getMemoryRepo();
-const input = (key = "key-12345678") => ({ pickup: { latitude: 0, longitude: 0, locationId: "loc-1" }, destinationLocationId: "loc-2", paymentMethod: "cash" as const, idempotencyKey: key });
+const input = (key = "key-12345678") => ({ pickup: { locationId: "loc-1" }, destinationLocationId: "loc-2", paymentMethod: "cash" as const, idempotencyKey: key });
 
 beforeEach(() => resetMemoryStore());
 

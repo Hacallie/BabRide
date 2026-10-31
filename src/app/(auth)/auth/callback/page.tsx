@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client-api";
 import { NEXT_KEY, describeSessionProblem, destinationFor, safeNext } from "@/lib/auth-utils";
 import { browserSupabase } from "@/lib/supabase-browser";
+import { startRiderSession } from "@/lib/client-session";
 import type { Me } from "@/components/Gate";
 import { btnAccent, glassPanel } from "@/components/ui";
 
@@ -45,6 +46,7 @@ export default function AuthCallback() {
       try { next = safeNext(sessionStorage.getItem(NEXT_KEY)); sessionStorage.removeItem(NEXT_KEY); } catch { /* storage unavailable */ }
       try {
         const me = await api<Me>("/api/v1/me");
+        if (me.actor.role === "rider" && code) await startRiderSession(); // a real sign-in (Google / email link), not a page refresh
         router.replace(destinationFor(me.actor.role, next));
       } catch (e) {
         setProblem(describeSessionProblem(e));

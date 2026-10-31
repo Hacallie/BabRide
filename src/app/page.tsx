@@ -7,10 +7,10 @@ import { FIXED_FARE_KOBO, formatNaira } from "@/lib/fare";
 
 const fare = formatNaira(FIXED_FARE_KOBO);
 const steps: [string, string][] = [
-  ["Pick your spots", "Choose pickup and destination from campus landmarks, or share your current location."],
+  ["Pick your spots", "Choose pickup and destination from campus landmarks."],
   ["See the fare up front", `Every eligible ride is ${fare}, whatever the distance.`],
-  ["Get matched", "An approved rider accepts your request. You see their name and tricycle number."],
-  ["Ride and pay", "Pay cash to the rider. Electronic payment is coming soon."],
+  ["Get matched", "A rider accepts your request. You see their name and tricycle number."],
+  ["Ride and pay", "Pay cash to the rider."],
 ];
 
 export default function Home() {
@@ -64,7 +64,7 @@ export default function Home() {
           <div className="grid items-center gap-6 rounded-xl2 border border-navy-100 bg-white p-7 shadow-sm sm:grid-cols-[1fr_auto] sm:p-9">
             <div>
               <h2 id="rider-h" className="text-2xl font-bold text-navy-950">Ride a tricycle on campus?</h2>
-              <p className="mt-2 max-w-xl text-navy-800">Apply online. An administrator reviews every application, and only approved riders can accept rides.</p>
+              <p className="mt-2 max-w-xl text-navy-800">Register online and start accepting rides from your rider page.</p>
             </div>
             <Link href="/rider/join" className="inline-flex min-h-[48px] items-center justify-center rounded-xl bg-royal px-6 font-semibold text-white hover:bg-[#1d4fc7]">Become a rider</Link>
           </div>

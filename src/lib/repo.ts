@@ -8,7 +8,8 @@ export interface NewRide {
   studentId: string; idempotencyKey: string;
   pickup: { latitude: number | null; longitude: number | null; locationId: string | null };
   passengerCount: number;
-  destinationLocationId: string; paymentMethod: "cash" | "electronic"; fareKobo: number;
+  destinationLocationId: string; paymentMethod: "cash" | "electronic";
+  /** Computed by the service: farePerPassengerKobo x passengerCount. */ fareKobo: number; farePerPassengerKobo: number;
 }
 
 /** Position is OPTIONAL: a landmark can be created by name alone and located later ("Not located yet"). */
@@ -44,8 +45,14 @@ export interface Repo {
   acceptRide(rideId: string, riderId: string): Promise<Ride>;
   markCashCollected(rideId: string): Promise<Ride>;
   getRider(id: string): Promise<RiderInfo | null>;
-  applyRider(actorId: string, vehicleRegistration?: string): Promise<RiderInfo>;
+  /** Creates the pending application. seatCapacity is what the rider declared (driver not counted); it is stored as declared. */
+  applyRider(actorId: string, vehicle: { registration?: string; seatCapacity: number }): Promise<RiderInfo>;
+  /** Persists availability (and a heartbeat). Safe to repeat. */
   setOnline(id: string, online: boolean): Promise<void>;
+  /** Heartbeat only: refreshes "last seen" and never changes the online flag. */
+  touchRider(id: string): Promise<void>;
+  /** Largest seat capacity among approved vehicles whose capacity was declared/confirmed (0 if none). */
+  maxDeclaredCapacity(): Promise<number>;
   listRiders(): Promise<RiderInfo[]>;
   setRiderApproval(id: string, status: RiderApproval, adminId: string): Promise<RiderInfo>;
   /** Records an administrator-confirmed seat capacity for the rider's vehicle. */

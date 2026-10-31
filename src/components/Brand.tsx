@@ -15,9 +15,9 @@ export function BrandMark({ className = "h-9 w-9" }: { className?: string }) {
 }
 export const TricycleMark = BrandMark; // backwards-compatible export name
 
-export default function Brand({ tone = "light" }: { tone?: "light" | "dark" }) {
+export default function Brand({ tone = "light", href = "/" }: { tone?: "light" | "dark"; href?: string }) {
   return (
-    <Link href="/" className="flex items-center gap-2.5" aria-label="Bab Ride home">
+    <Link href={href} className="flex items-center gap-2.5" aria-label="Bab Ride home">
       <BrandMark />
       <span className={`text-xl font-extrabold tracking-tight ${tone === "light" ? "text-white" : "text-navy-950"}`}>Bab<span className="text-mist">Ride</span></span>
     </Link>

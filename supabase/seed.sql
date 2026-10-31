@@ -6,5 +6,5 @@ insert into campus_locations (institution_id, name, description, latitude, longi
 select id, n, 'Name supplied by project owner; map position not verified', 0, 0 + o, false
 from institutions,
   (values ('CAF',0.0001),('BUSA',0.0002),('Big Meal',0.0003),('Guest House',0.0004),
-          ('Amphitheatre',0.0005),('Emerald Hall',0.0006),('Winslow Hall',0.0007)) v(n,o)
+          ('Amphitheatre',0.0005),('Emerald Hall',0.0006)) v(n,o)
 where slug='babcock';

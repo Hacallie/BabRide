@@ -1,7 +1,7 @@
 "use client";
 /**
- * Number of people travelling. The fare does NOT change with this number (it is per ride); the server enforces the
- * limit and each rider's vehicle capacity when they accept.
+ * Number of people travelling (the driver is not counted). The fare is ₦200 x this number; the server recomputes it and
+ * enforces the limit and each rider's vehicle capacity.
  */
 export default function PassengerPicker({ value, onChange, max, tone = "light", disabled }: {
   value: number; onChange: (n: number) => void; max: number; tone?: "light" | "dark"; disabled?: boolean;
@@ -15,7 +15,7 @@ export default function PassengerPicker({ value, onChange, max, tone = "light", 
         <button type="button" className={btn} aria-label="One fewer passenger" disabled={disabled || value <= 1} onClick={() => onChange(value - 1)}>−</button>
         <output aria-live="polite" className={`min-w-[2.5rem] text-center text-2xl font-extrabold tabular-nums ${dark ? "text-white" : "text-navy-950"}`}>{value}</output>
         <button type="button" className={btn} aria-label="One more passenger" disabled={disabled || value >= max} onClick={() => onChange(value + 1)}>+</button>
-        <p className={`min-w-0 flex-1 text-xs ${dark ? "text-mist" : "text-navy-700"}`}>Up to {max} per booking. Same fare for the whole ride. A rider with a confirmed seat capacity must accept groups.</p>
+        <p className={`min-w-0 flex-1 text-xs ${dark ? "text-mist" : "text-navy-700"}`}>Up to {max} per booking. ₦200 per passenger. A rider whose keke has enough seats must accept groups.</p>
       </div>
     </fieldset>
   );
