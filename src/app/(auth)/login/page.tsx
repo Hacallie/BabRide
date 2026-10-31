@@ -11,7 +11,7 @@ export default function Login() {
       <AuthPanel
         initialView="signin"
         switchHrefs={{ signin: "/login", signup: "/signup" }}
-        intro="Book campus tricycle rides for a fixed ₦200."
+        intro="Book campus tricycle rides for ₦200 per passenger."
         footer={<p>Give rides on campus? <Link href="/rider/login" className="font-semibold text-white underline underline-offset-2">Rider sign-in</Link> · <Link href="/rider/join" className="font-semibold text-white underline underline-offset-2">Join as a rider</Link></p>}
       />
     </div>
