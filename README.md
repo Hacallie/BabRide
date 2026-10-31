@@ -1,6 +1,6 @@
 # Bab Ride
 
-Campus-only tricycle booking for Babcock University, Nigeria. Fixed fare ₦200 (20000 kobo), enforced on the server.
+Campus-only tricycle booking for Babcock University, Nigeria. Fare ₦200 per passenger (20000 kobo each; total = ₦200 × passengers), computed and enforced on the server.
 Not affiliated with or endorsed by the university unless that authorization is obtained.
 
 ## Status after Phase 4, Step 1
@@ -34,7 +34,7 @@ Copy-Item .env.example .env.local
 notepad .env.local      # fill in the three required Supabase values
 ```
 
-In the Supabase SQL editor, run in order: `supabase/migrations/0001_core.sql`, `supabase/migrations/0002_app.sql`, `supabase/seed.sql`.
+In the Supabase SQL editor, run in order: every file in `supabase/migrations/` (`0001` to `0007`), then `supabase/seed.sql`. Existing projects only need the files they have not yet applied (for this update: `0007_per_passenger_fare_presence_capacity.sql`, then check with `supabase/diagnostics/0007_verify.sql`).
 Then:
 
 ```powershell
@@ -96,3 +96,11 @@ Their coordinates are **placeholders** and shown as "unverified". The campus bou
 - **Google/Apple buttons are hidden unless `NEXT_PUBLIC_AUTH_GOOGLE_ENABLED` / `NEXT_PUBLIC_AUTH_APPLE_ENABLED` is `true`.** These values are read when the dev server starts: after editing `.env.local`, stop and rerun `npm run dev`. In development, a dashed note on the login page says when a button is hidden. Showing the button does not mean Google works: the provider must be enabled in Supabase with a Google client ID and secret (Google Cloud Console), and `https://<project-ref>.supabase.co/auth/v1/callback` must be an authorized redirect URI.
 - `GET /api/v1/me 401` is normal for visitors who are not signed in. If it happens **right after** a successful sign-in, check (names only): `SUPABASE_SERVICE_ROLE_KEY` must belong to the same project as `NEXT_PUBLIC_SUPABASE_URL`. A signed-in user whose profile row is missing now gets `403 PROFILE_MISSING` and a server log line; fix by applying `supabase/migrations/0002_app.sql` (the `handle_new_user` trigger).
 - `otp_expired` on the callback means the link was already used, expired, or pre-opened by an email scanner. A link and a code in the same email are one token: using one cancels the other. Request a new email.
+
+## Booking, maps, availability and fares (latest update)
+
+- **Fare:** ₦200 × passengers (1 = ₦200 … 4 = ₦800). Computed on the server from the passenger count; the client's fare is ignored. Stored on the ride as `fare_per_passenger_kobo` and `fare_amount_kobo` (total). Rides created before this update keep their old per-ride total.
+- **Seat capacity:** riders enter *Passenger seat capacity* (driver not counted) when applying. Bookings are refused up front if no approved keke seats the group, and a rider can only accept a group their capacity covers. Approval workflow is unchanged.
+- **Auto-online:** after a rider signs in, the app calls `POST /api/v1/rider/session/start`, which sets them Online (if approved, not suspended, vehicle approved). Sign-out calls `/rider/session/end`. Presence also expires on its own if the rider page stops sending heartbeats (`BABRIDE_PRESENCE_TTL_SEC`).
+- **Landmarks:** "has a map position" is decided only by real coordinates. Administrators save positions in Admin → Landmarks; the Overview tab lists landmarks that still need one.
+- **Search / Use my location:** the campus search matches landmark names; admin place search uses the configured geocoder and is limited to the campus (saved `campus_boundary`, else `GEOCODER_VIEWBOX`). "Use my location" asks the server for the nearest landmark within `BABRIDE_NEAREST_MAX_METERS`.

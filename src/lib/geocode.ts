@@ -3,8 +3,11 @@
 // but its usage policy requires an identifying contact (GEOCODER_CONTACT) and light use. Swap in another provider
 // (e.g. Mapbox, with a SERVER-side token) by implementing GeocodeProvider.
 import { ApiError } from "@/lib/errors";
+import { onCampus, parseBounds } from "@/lib/landmark-geo";
+import type { Boundary } from "@/lib/fare";
 
-export interface GeoCandidate { label: string; latitude: number; longitude: number }
+/** campus: "on" = verified inside the campus polygon/rectangle; "unchecked" = no campus area is configured, so it could not be checked. */
+export interface GeoCandidate { label: string; latitude: number; longitude: number; campus?: "on" | "unchecked" }
 export type GeocoderConfig = { provider: "none" } | { provider: "nominatim"; baseUrl: string; contact: string; viewbox: string | null; context: string };
 type Env = Record<string, string | undefined>;
 
@@ -52,22 +55,27 @@ async function queryProvider(cfg: Extract<GeocoderConfig, { provider: "nominatim
   } finally { clearTimeout(timer); }
 }
 
-/** Campus-first search: (1) the name with the campus as context, (2) inside the owner's viewbox if set, (3) plain, as a last resort. */
-export async function searchPlaces(q: string, env: Env = process.env, fetchImpl: typeof fetch = fetch): Promise<GeoCandidate[]> {
+/** Campus-only search. When a campus area is known (saved polygon, else GEOCODER_VIEWBOX) results outside it are DROPPED on the server and
+ *  the unrestricted "plain" query is never used. When no area is configured nothing can be verified, so results are marked "unchecked". */
+export async function searchPlaces(q: string, env: Env = process.env, fetchImpl: typeof fetch = fetch, boundary: Boundary = null): Promise<GeoCandidate[]> {
   const cfg = geocoderConfig(env);
   if (cfg.provider === "none")
     throw new ApiError(503, "GEOCODER_NOT_CONFIGURED", "Place search isn't set up on this server. You can still use your current GPS position.");
+  const bounds = parseBounds(cfg.viewbox);
+  const restricted = !!boundary || !!bounds;
   try {
     const attempts: [string, boolean][] = [[`${q}, ${cfg.context}`, false]];
     if (cfg.viewbox) attempts.push([q, true]);
-    attempts.push([q, false]);
+    if (!restricted) attempts.push([q, false]);
     const seen = new Set<string>(); const out: GeoCandidate[] = [];
     for (const [query, bounded] of attempts) {
       for (const c of await queryProvider(cfg, query, bounded, fetchImpl)) {
+        const where = onCampus(c, boundary, bounds);
+        if (where === false) continue;
         const k = `${c.latitude.toFixed(5)},${c.longitude.toFixed(5)}`;
-        if (!seen.has(k)) { seen.add(k); out.push(c); }
+        if (!seen.has(k)) { seen.add(k); out.push({ ...c, campus: where === true ? "on" : "unchecked" }); }
       }
-      if (out.length >= 3) break; // enough campus-first results; spare the provider
+      if (out.length >= 3) break;
     }
     return out.slice(0, 6);
   } catch {

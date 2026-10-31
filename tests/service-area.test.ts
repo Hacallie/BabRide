@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMemoryRepo, resetMemoryStore, setTestBoundary } from "./helpers/memory-repo";
+import { getMemoryRepo, resetMemoryStore, setTestBoundary, setTestLocationPosition } from "./helpers/memory-repo";
 import { addLocationSchema } from "@/lib/schemas";
 import { adminAddLocation, createRide, quote } from "@/lib/service";
 import { serviceAreaMode } from "@/lib/config";
@@ -57,8 +57,10 @@ describe("landmarks mode (opt-in)", () => {
     await expect(quote(repo, { latitude: 6.9, longitude: 3.7 }, "loc-2")).rejects.toMatchObject({ code: "BOUNDARY_NOT_CONFIGURED" });
   });
   it("when a polygon exists and both landmarks are located, geometry wins: outside means refused", async () => {
-    const far = await adminAddLocation(repo, admin, addLocationSchema.parse({ name: "Far away", latitude: 50, longitude: 50, source: "map" }));
-    const near = await adminAddLocation(repo, admin, addLocationSchema.parse({ name: "Near", latitude: 0.2, longitude: 0.2, source: "map" }));
+    // A located landmark that sits outside the polygon (e.g. legacy data): the admin API now refuses to save one, so plant it directly.
+    const far = await adminAddLocation(repo, admin, addLocationSchema.parse({ name: "Far away" }));
+    setTestLocationPosition(far.id, 50, 50);
+    const near = await adminAddLocation(repo, admin, addLocationSchema.parse({ name: "Near", latitude: 10.02, longitude: 20.02, source: "map" }));
     await expect(quote(repo, { locationId: far.id }, near.id)).rejects.toMatchObject({ code: "PICKUP_OUT_OF_AREA" });
     expect((await quote(repo, { locationId: near.id }, "loc-2")).fareKobo).toBe(20000);
   });

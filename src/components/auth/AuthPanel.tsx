@@ -11,6 +11,7 @@ import {
   nameProblem, normalizeEmail, passwordProblem, safeNext,
 } from "@/lib/auth-utils";
 import { browserSupabase } from "@/lib/supabase-browser";
+import { startRiderSession } from "@/lib/client-session";
 import type { Role } from "@/lib/types";
 
 type View = "signin" | "signup";
@@ -69,9 +70,12 @@ export default function AuthPanel({ initialView = "signin", switchHrefs, heading
 
   // After any successful sign-in: ask OUR server who this is (the role comes from the database), then continue.
   // If that call fails we say so; we never show a "success" state on the strength of the browser session alone.
-  const finish = useCallback(async () => {
+  const finish = useCallback(async (fresh = false) => {
     try {
       const me = await api<Me>("/api/v1/me");
+      // A registered rider who has just SIGNED IN goes online automatically (persisted by the server). "Continue" on an
+      // already-open session is not a sign-in, so it never overrides a rider who chose to be offline. Never blocks sign-in.
+      if (fresh && me.actor.role === "rider") await startRiderSession();
       let dest = next.current;
       try { dest = safeNext(sessionStorage.getItem(NEXT_KEY)) ?? dest; sessionStorage.removeItem(NEXT_KEY); } catch { /* ignore */ }
       if (onSignedIn) { submitting.current = false; setBusy(false); onSignedIn(); return; }
@@ -109,7 +113,7 @@ export default function AuthPanel({ initialView = "signin", switchHrefs, heading
         const res = await sb.auth.signInWithPassword({ email: em!, password });
         if (res.error) { done(); return setNotice({ kind: "error", text: describeAuthError(res.error) }); }
       }
-      await finish();
+      await finish(true);
     } catch (e) { done(); setNotice({ kind: "error", text: describeAuthError(e) }); }
   }
 

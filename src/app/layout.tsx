@@ -1,18 +1,34 @@
+
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import SiteHeader from "@/components/SiteHeader";
 import ModeBanner from "@/components/ModeBanner";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "Bab Ride: your campus, your ride",
-  description: "Book a campus tricycle for a fixed ₦200 fare. Built for Babcock University. Not affiliated with or endorsed by the university.",
+  metadataBase: new URL("https://www.babride.bond"),
+  title: "Bab Ride | Campus Tricycle Rides",
+  description:
+    "Book campus tricycle rides at a fixed ₦200 fare. Built for Babcock University. Not affiliated with or endorsed by the university.",
 };
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#071A3D" };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#071A3D",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en" className={inter.variable}>
       <body>

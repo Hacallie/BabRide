@@ -2,11 +2,14 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ClientApiError, uid } from "@/lib/client-api";
-import { FIXED_FARE_KOBO, formatNaira } from "@/lib/fare";
+import { formatNaira } from "@/lib/fare";
 import { STATUS_LABEL } from "@/components/StatusBadge";
 import type { Ride } from "@/lib/types";
 import PassengerPicker from "@/components/PassengerPicker";
 import LandmarkPicker from "./LandmarkPicker";
+import UseMyLocation from "@/components/booking/UseMyLocation";
+import CampusSearch from "@/components/booking/CampusSearch";
+import FareSummary from "@/components/booking/FareSummary";
 import { SELECT_DESTINATION_EVENT, type Landmark } from "./types";
 
 type Outcome = { kind: "ok"; ride: Ride } | { kind: "error"; msg: string } | { kind: "auth" } | null;
@@ -18,10 +21,8 @@ export default function BookingPanel() {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [mode, setMode] = useState<string | null>(null);
   const [pickupId, setPickupId] = useState(""); const [destId, setDestId] = useState("");
-  const [gps, setGps] = useState<{ latitude: number; longitude: number; acc: number } | null>(null);
-  const [gpsMsg, setGpsMsg] = useState<string | null>(null);
-  const [fieldErr, setFieldErr] = useState<string | null>(null);
-  const [passengers, setPassengers] = useState(1); const [maxPax, setMaxPax] = useState(3);
+    const [fieldErr, setFieldErr] = useState<string | null>(null);
+  const [passengers, setPassengers] = useState(1); const [maxPax, setMaxPax] = useState(4);
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<Outcome>(null);
   const key = useRef(uid()); // reused on retry: a double tap cannot create two rides
@@ -37,20 +38,10 @@ export default function BookingPanel() {
   }, []);
 
   function validate(): string | null {
-    if (!pickupId && !gps) return "Choose a pickup landmark or use your current location.";
+    if (!pickupId) return "Choose a pickup landmark or use your current location.";
     if (!destId) return "Choose a destination.";
-    if (pickupId && !gps && pickupId === destId) return "Pickup and destination must be different.";
+    if (pickupId === destId) return "Pickup and destination must be different.";
     return null;
-  }
-
-  function useLocation() {
-    setGpsMsg(null);
-    if (!("geolocation" in navigator)) return setGpsMsg("Location isn't available on this device. Choose a landmark instead.");
-    setGpsMsg("Getting your location…");
-    navigator.geolocation.getCurrentPosition(
-      (p) => { setGps({ latitude: p.coords.latitude, longitude: p.coords.longitude, acc: Math.round(p.coords.accuracy) }); setPickupId(""); setGpsMsg(null); },
-      () => setGpsMsg("Location permission was denied or unavailable. Choose a landmark instead."),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 });
   }
 
   const submit = useCallback(async () => {
@@ -63,18 +54,17 @@ export default function BookingPanel() {
       try { me = await api("/api/v1/me"); }
       catch (e) { if (e instanceof ClientApiError && e.status === 401) { setOut({ kind: "auth" }); return; } throw e; }
       if (me.actor.role !== "student") { setOut({ kind: "error", msg: `You are signed in as ${me.actor.role}. Only student accounts can book rides.` }); return; }
-      // A landmark pickup sends only its id (the server looks the position up); GPS sends the device position.
-      const pickup = gps ? { latitude: gps.latitude, longitude: gps.longitude } : { locationId: pickupId };
-      // No fare is sent: the server computes and stores it.
+      // Only the landmark id is sent (the server looks the position up). No fare is sent: the server computes ₦200 x passengers.
+      const pickup = { locationId: pickupId };
       const { ride } = await api<{ ride: Ride }>("/api/v1/rides", { method: "POST", body: { pickup, destinationLocationId: destId, passengerCount: passengers, paymentMethod: "cash", idempotencyKey: key.current } });
       key.current = uid();
       try { sessionStorage.removeItem(DRAFT); } catch { /* ignore */ }
       setOut({ kind: "ok", ride });
     } catch (e) { setOut({ kind: "error", msg: e instanceof Error ? e.message : "Could not request a ride." }); }
     finally { setBusy(false); }
-  }, [pickupId, destId, gps, busy, passengers]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pickupId, destId, busy, passengers]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function swap() { if (gps) return; setPickupId(destId); setDestId(pickupId); }
+  function swap() { setPickupId(destId); setDestId(pickupId); }
 
   if (out?.kind === "ok") {
     const r = out.ride;
@@ -83,7 +73,7 @@ export default function BookingPanel() {
         <p className="text-sm font-medium text-mist">Ride requested</p>
         <h2 className="mt-1 text-2xl font-bold">{STATUS_LABEL[r.status]}</h2>
         <p className="mt-3 text-white">{r.pickup.label} → {r.destination.name}</p>
-        <p className="mt-1 text-mist">Fare {formatNaira(r.fareKobo)} for the whole ride · {r.passengerCount} {r.passengerCount === 1 ? "passenger" : "passengers"} · pay cash to the rider</p>
+        <p className="mt-1 text-mist">Total fare {formatNaira(r.fareKobo)} · {r.passengerCount} {r.passengerCount === 1 ? "passenger" : "passengers"} × {formatNaira(r.farePerPassengerKobo)} · pay cash to the rider</p>
         <Link href="/student" className="mt-5 inline-flex min-h-[48px] w-full items-center justify-center rounded-xl bg-royal px-5 font-semibold text-white hover:bg-[#1d4fc7]">Track this ride</Link>
       </section>
     );
@@ -93,19 +83,17 @@ export default function BookingPanel() {
     <section id="book" aria-labelledby="book-h" className="on-dark glass scroll-mt-20 rounded-xl2 p-5 text-white sm:p-6">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="book-h" className="text-lg font-bold">Book a tricycle</h2>
-        <span className="rounded-md bg-white/10 px-2 py-1 text-xs font-semibold text-accent">Fixed fare</span>
+        <span className="rounded-md bg-white/10 px-2 py-1 text-xs font-semibold text-accent">{formatNaira(20000)} per passenger</span>
       </div>
 
       <div className="mt-4 space-y-3">
         <LandmarkPicker label="Pickup" tone="origin" options={lms.filter((l) => l.pickupAllowed)} value={pickupId} loading={loading}
-          onChange={(id) => { setPickupId(id); setGps(null); setFieldErr(null); }} placeholder="Where are you?"
-          overrideText={gps ? `Current location (±${gps.acc} m, GPS pin)` : null} onClearOverride={() => setGps(null)} />
+          onChange={(id) => { setPickupId(id); setFieldErr(null); }} placeholder="Where are you?" />
         <div className="flex items-center gap-2 pl-[18px]">
           <span aria-hidden="true" className="h-6 border-l-2 border-dashed border-white/30" />
-          <button type="button" onClick={swap} disabled={!!gps} aria-label="Swap pickup and destination" className="rounded-lg border border-white/15 px-2.5 py-1 text-xs font-medium text-mist transition hover:bg-white/10 disabled:opacity-40">Swap</button>
-          <button type="button" onClick={useLocation} className="rounded-lg border border-white/15 px-2.5 py-1 text-xs font-medium text-mist transition hover:bg-white/10">Use current location</button>
+          <button type="button" onClick={swap} aria-label="Swap pickup and destination" className="rounded-lg border border-white/15 px-2.5 py-1 text-xs font-medium text-mist transition hover:bg-white/10">Swap</button>
+          <UseMyLocation tone="dark" onMatch={(m) => { setPickupId(m.id); setFieldErr(null); setOut(null); }} />
         </div>
-        {gpsMsg && <p role="status" className="text-sm text-mist">{gpsMsg}</p>}
         <LandmarkPicker label="Destination" tone="destination" options={lms.filter((l) => l.destinationAllowed)} value={destId} loading={loading}
           onChange={(id) => { setDestId(id); setFieldErr(null); }} placeholder="Where to?" />
       </div>
@@ -113,15 +101,11 @@ export default function BookingPanel() {
       {loadErr && <p role="alert" className="mt-3 rounded-lg bg-red-500/15 p-3 text-sm text-red-100">Landmarks are unavailable right now: {loadErr}</p>}
       {!loading && !loadErr && lms.length === 0 && <p className="mt-3 rounded-lg bg-white/10 p-3 text-sm text-mist">No landmarks have been added yet. An administrator can add them.</p>}
 
+      <div className="mt-4"><CampusSearch tone="dark" idPrefix="home" onPick={(h, as) => { if (as === "pickup") setPickupId(h.id); else setDestId(h.id); setFieldErr(null); setOut(null); }} /></div>
+
       <div className="mt-4"><PassengerPicker tone="dark" value={passengers} onChange={setPassengers} max={maxPax} /></div>
 
-      <div className="mt-4 flex items-end justify-between rounded-xl border border-white/12 bg-white/5 p-4">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-mist">Fare</p>
-          <p className="text-3xl font-extrabold leading-none">{formatNaira(FIXED_FARE_KOBO)}</p>
-        </div>
-        <p className="max-w-[11rem] text-right text-xs text-mist">per ride, whatever the distance or group size. The server confirms the fare.</p>
-      </div>
+      <div className="mt-4"><FareSummary passengers={passengers} tone="dark" /></div>
 
       <fieldset className="mt-4">
         <legend className="mb-1.5 text-xs font-medium uppercase tracking-wide text-mist">Payment</legend>

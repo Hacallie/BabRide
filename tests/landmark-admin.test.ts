@@ -5,7 +5,7 @@ import { adminAddLocation, adminSetLocationPosition, adminUpdateLocationDetails,
 import { admin, rider, student } from "./helpers/ride-fixtures";
 
 const repo = getMemoryRepo();
-const point = { latitude: 6.8912, longitude: 3.7203, source: "search" as const };
+const point = { latitude: 10.0305, longitude: 20.0305, source: "search" as const };
 beforeEach(() => resetMemoryStore());
 
 describe("creating a landmark needs only a name (the reported bug)", () => {
@@ -23,7 +23,7 @@ describe("creating a landmark needs only a name (the reported bug)", () => {
   });
   it("still validates a position when one is given (complete, real, valid range)", () => {
     expect(addLocationSchema.safeParse({ name: "Library", ...point }).success).toBe(true);
-    expect(addLocationSchema.safeParse({ name: "Library", latitude: 6.9, source: "map" }).success).toBe(false);
+    expect(addLocationSchema.safeParse({ name: "Library", latitude: 10.04, source: "map" }).success).toBe(false);
     expect(addLocationSchema.safeParse({ name: "Library", ...point, latitude: 91 }).success).toBe(false);
     expect(addLocationSchema.safeParse({ name: "Library", ...point, latitude: 0, longitude: 0 }).success).toBe(false);
   });
@@ -43,17 +43,17 @@ describe("full landmark workflow: create, edit, locate, verify, public map", () 
     expect(edited).toMatchObject({ name: "Main Library", description: "Near the gate", destinationAllowed: false, status: "placeholder" });
 
     const located = await adminSetLocationPosition(repo, admin, created.id, setLocationPositionSchema.parse(point));
-    expect(located).toMatchObject({ status: "selected", latitude: 6.8912, longitude: 3.7203, source: "search" });
+    expect(located).toMatchObject({ status: "selected", latitude: 10.0305, longitude: 20.0305, source: "search" });
     expect(await adminVerifyLocation(repo, admin, created.id)).toMatchObject({ status: "verified", verified: true });
 
     // Editing details NEVER moves the position or clears verification.
     const renamed = await adminUpdateLocationDetails(repo, admin, created.id, { name: "Library (Main)" });
-    expect(renamed).toMatchObject({ name: "Library (Main)", status: "verified", latitude: 6.8912, longitude: 3.7203 });
+    expect(renamed).toMatchObject({ name: "Library (Main)", status: "verified", latitude: 10.0305, longitude: 20.0305 });
 
     // Moving verified coordinates still needs explicit confirmation.
-    const other = setLocationPositionSchema.parse({ latitude: 6.9, longitude: 3.73, source: "map" });
+    const other = setLocationPositionSchema.parse({ latitude: 10.04, longitude: 20.04, source: "map" });
     await expect(adminSetLocationPosition(repo, admin, created.id, other)).rejects.toMatchObject({ code: "VERIFIED_LOCATION" });
-    expect((await repo.listLocations()).find((x) => x.id === created.id)).toMatchObject({ latitude: 6.8912, status: "verified" });
+    expect((await repo.listLocations()).find((x) => x.id === created.id)).toMatchObject({ latitude: 10.0305, status: "verified" });
   });
   it("deactivating hides a landmark from students but keeps it for admins; reactivating restores it", async () => {
     const l = await adminAddLocation(repo, admin, addLocationSchema.parse({ name: "Library" }));

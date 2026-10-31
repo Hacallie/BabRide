@@ -36,12 +36,16 @@ describe("campus-first place search", () => {
     expect(decodeURIComponent(urls[0]!.replace(/\+/g, " "))).toMatch(/Emerald Hall, Babcock University/);
     expect(urls).toHaveLength(1); // enough results: the provider is not hit again
   });
-  it("falls back to a bounded search, then a plain one, and merges without duplicates", async () => {
+  it("with a campus area known: asks bounded, NEVER runs an unrestricted query, and drops anything outside", async () => {
     const urls: string[] = []; let n = 0;
-    const f = (async (u: string) => { urls.push(u); n++; return new Response(JSON.stringify(n === 1 ? [] : n === 2 ? [hit("6.89", "3.72", "A")] : [hit("6.89", "3.72", "A"), hit("7.1", "3.9", "Z")])); }) as unknown as typeof fetch;
+    const f = (async (u: string) => { urls.push(u); n++; return new Response(JSON.stringify(n === 1 ? [hit("7.1", "3.9", "Elsewhere")] : [hit("6.89", "3.72", "A"), hit("7.1", "3.9", "Elsewhere")])); }) as unknown as typeof fetch;
     const out = await searchPlaces("Library", { ...env, GEOCODER_VIEWBOX: "3.70,6.88,3.74,6.90" }, f);
-    expect(urls).toHaveLength(3);
-    expect(urls[1]).toMatch(/bounded=1/); expect(urls[1]).toMatch(/viewbox=/); expect(urls[2]).not.toMatch(/bounded/);
-    expect(out.map((c) => c.label)).toEqual(["A", "Z"]);
+    expect(urls).toHaveLength(2);
+    expect(urls[1]).toMatch(/bounded=1/); expect(urls[1]).toMatch(/viewbox=/);
+    expect(out.map((c) => c.label)).toEqual(["A"]); expect(out[0]!.campus).toBe("on");
+  });
+  it("with no campus area configured it cannot verify results, so it says so (unchecked)", async () => {
+    const f = (async () => new Response(JSON.stringify([hit("6.89", "3.72", "A")]))) as unknown as typeof fetch;
+    expect((await searchPlaces("Library", env, f))[0]!.campus).toBe("unchecked");
   });
 });

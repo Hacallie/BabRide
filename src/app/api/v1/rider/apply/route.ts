@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export const POST = handle(async (req) => {
   const body = await jsonBody(req);
 
-  const { vehicleRegistration } = parse(
+  const { vehicleRegistration, seatCapacity } = parse(
     riderApplySchema,
     body ?? {},
   );
@@ -24,7 +24,7 @@ export const POST = handle(async (req) => {
     rider: await riderApply(
       await getRepo(),
       await getActor(req),
-      normalizedRegistration,
+      { vehicleRegistration: normalizedRegistration, seatCapacity },
     ),
   };
 }, 201);

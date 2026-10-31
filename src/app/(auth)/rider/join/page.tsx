@@ -5,6 +5,7 @@ import AuthPanel from "@/components/auth/AuthPanel";
 import type { Me } from "@/components/Gate";
 import { btnAccent, btnGlass, glassPanel } from "@/components/ui";
 import { api, ClientApiError } from "@/lib/client-api";
+import { glassInput, glassLabel } from "@/components/ui";
 
 type State = { s: "loading" } | { s: "anon" } | { s: "ready"; me: Me } | { s: "error"; msg: string };
 const STEPS = ["Create or sign in to your account", "Submit your rider application", "Wait for administrator approval"];
@@ -60,14 +61,21 @@ function Onboarding({ me, reload }: { me: Me; reload: () => Promise<void> }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const sending = useRef(false); // synchronous guard against double taps
+  const [seats, setSeats] = useState(""); const [seatErr, setSeatErr] = useState<string | null>(null);
+  const [maxSeats, setMaxSeats] = useState(6);
+  useEffect(() => { api<{ maxVehicleSeats?: number }>("/api/v1/mode").then((m) => { if (m.maxVehicleSeats) setMaxSeats(m.maxVehicleSeats); }).catch(() => {}); }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (sending.current) return;
+    // Same rule as the server (which re-checks it): a whole number of passenger seats, driver not counted.
+    const n = Number(seats);
+    if (seats.trim() === "" || !Number.isInteger(n) || n < 1 || n > maxSeats) { setSeatErr(`Enter a whole number of passenger seats from 1 to ${maxSeats}.`); return; }
+    setSeatErr(null);
     sending.current = true; setBusy(true); setErr(null);
     try {
       // The server answers only after the application row is saved; the request itself times out after 20 s.
-      await api("/api/v1/rider/apply", { method: "POST", body: {} });
+      await api("/api/v1/rider/apply", { method: "POST", body: { seatCapacity: n } });
       await reload(); // re-reads the saved status from the server: what we show is what was stored
     } catch (x) { setErr(x instanceof Error ? x.message : "Could not submit your application."); }
     finally { sending.current = false; setBusy(false); }
@@ -84,6 +92,7 @@ function Onboarding({ me, reload }: { me: Me; reload: () => Promise<void> }) {
       <section className={glassPanel} aria-live="polite">
         <h2 className="text-xl font-bold">{a === "approved" ? "You're approved" : a === "pending" ? "Application received" : a ? `Application ${a}` : "Rider account"}</h2>
         {me.rider?.vehicle?.registration && <p className="mt-2 text-sm text-mist">Tricycle: <b className="text-white">{me.rider.vehicle.registration}</b></p>}
+        {me.rider?.vehicle && <p className="mt-1 text-sm text-mist">Passenger seats: <b className="text-white">{me.rider.vehicle.capacity}</b></p>}
         <p className="mt-3 text-mist">
           {a === "approved" ? "You can go online and accept rides from the rider page."
             : a === "pending" ? "An administrator needs to approve your application. Until then you can't go online or accept rides. Check back later."
@@ -100,6 +109,13 @@ function Onboarding({ me, reload }: { me: Me; reload: () => Promise<void> }) {
       <h2 id="apply-h" className="text-xl font-bold">Step 2: apply to ride</h2>
       <p className="mt-1 text-sm text-mist">Signed in as <b className="text-white">{me.actor.name}</b>.</p>
       <p className="mt-4 text-sm text-mist">We'll send your application to an administrator. You don't need to enter a tricycle number.</p>
+      <div className="mt-4">
+        <label className={glassLabel} htmlFor="seats">Passenger seat capacity</label>
+        <input id="seats" required inputMode="numeric" autoComplete="off" maxLength={1} value={seats} aria-invalid={!!seatErr} aria-describedby={seatErr ? "seats-err" : "seats-hint"}
+          onChange={(e) => { setSeats(e.target.value.replace(/\D/g, "").slice(0, 1)); setSeatErr(null); }} className={glassInput} placeholder="e.g. 3" />
+        <p id="seats-hint" className="mt-1 text-xs text-mist">How many passengers your keke can legally and safely carry. Do not count yourself as the driver.</p>
+        {seatErr && <p id="seats-err" role="alert" className="mt-1 text-sm text-red-200">{seatErr}</p>}
+      </div>
       {err && <p role="alert" className="mt-3 rounded-lg bg-red-500/15 p-3 text-sm text-red-100">{err}</p>}
       <button className={`${btnAccent} mt-5 w-full`} disabled={busy} aria-busy={busy}>{busy ? "Submitting…" : err ? "Try again" : "Submit application"}</button>
       <p className="mt-3 text-xs text-mist">Submitting creates a <b className="text-white">pending</b> application. Nothing is approved automatically.</p>

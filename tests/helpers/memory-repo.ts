@@ -5,8 +5,10 @@ import type { RideStatus } from "@/lib/ride-state";
 import type { Loc, LocSource, Ride, RiderApproval, RiderInfo } from "@/lib/types";
 import type { LocationDetailsPatch, NewLoc, NewRide, Repo } from "@/lib/repo";
 import { ApiError } from "@/lib/errors";
+import { presenceTtlSec } from "@/lib/config";
+import { effectiveOnline } from "@/lib/presence";
 
-interface Store { locs: Loc[]; rides: Ride[]; riders: Map<string, RiderInfo>; seq: number; boundary: Boundary }
+interface Store { locs: Loc[]; rides: Ride[]; riders: Map<string, RiderInfo>; seen: Map<string, string>; seq: number; boundary: Boundary }
 const g = globalThis as unknown as { __babride?: Store };
 
 export const TEST_USERS = {
@@ -15,14 +17,17 @@ export const TEST_USERS = {
   admin: { id: "test-admin", name: "Test Admin" },
 } as const;
 
+export const TEST_ORIGIN = { latitude: 10, longitude: 20 } as const; // fixture area, NOT a real place
 const ACTIVE: RideStatus[] = ["searching", "assigned", "rider_arriving", "rider_arrived", "in_progress"];
 const RIDER_BUSY: RideStatus[] = ["assigned", "rider_arriving", "rider_arrived", "in_progress"];
 
 function seed(): Store {
   const names = ["CAF", "BUSA", "Big Meal", "Guest House", "Amphitheatre", "Emerald Hall", "Winslow Hall"];
+  // TEST-ONLY fixture positions in an arbitrary spot far from any real campus (about 10.00N, 20.00E), ~110 m apart along a diagonal.
+  // They are fixtures, not Babcock coordinates. A test that needs an UNLOCATED landmark makes one with setTestLocationPosition(id, 0, 0, "placeholder").
   const locs: Loc[] = names.map((name, i) => ({
-    id: `loc-${i + 1}`, name, description: "Name supplied by the project owner. Map position NOT verified (placeholder coordinates).",
-    latitude: 0, longitude: 0.0001 * (i + 1), verified: false, status: "placeholder", source: null,
+    id: `loc-${i + 1}`, name, description: "Test fixture landmark (not a real position).",
+    latitude: TEST_ORIGIN.latitude + 0.001 * i, longitude: TEST_ORIGIN.longitude + 0.001 * i, verified: false, status: "selected", source: "map",
     pickupAllowed: true, destinationAllowed: true, active: true,
   }));
   const riders = new Map<string, RiderInfo>();
@@ -30,13 +35,20 @@ function seed(): Store {
     vehicle: { registration: "TEST-TRICYCLE-1", approval: "approved", capacity: 3, capacityVerified: true } });
   riders.set("test-rider-pending", { userId: "test-rider-pending", name: "Test Applicant", approval: "pending", online: false,
     vehicle: { registration: "TEST-TRICYCLE-2", approval: "pending", capacity: 3, capacityVerified: false } });
-  // TEST-ONLY square around (0,0). Not real campus coordinates.
-  return { locs, rides: [], riders, seq: 1, boundary: [[-1, -1], [-1, 1], [1, 1], [1, -1]] };
+  // TEST-ONLY square around the fixture area ([lng, lat] ring). Not real campus coordinates.
+  return { locs, rides: [], riders, seen: new Map(), seq: 1, boundary: [[19.9, 9.9], [19.9, 10.1], [20.1, 10.1], [20.1, 9.9]] };
 }
 const S = (): Store => (g.__babride ??= seed());
 export const setTestBoundary = (b: Boundary) => { S().boundary = b; };
 export const resetMemoryStore = () => { g.__babride = seed(); };
 const clone = <T,>(v: T): T => structuredClone(v);
+/** Raw flag + heartbeat -> effective presence, exactly like the Supabase repo. */
+const view = (r: RiderInfo): RiderInfo => ({ ...clone(r), online: effectiveOnline(r.online, S().seen.get(r.userId), presenceTtlSec()) });
+/** Test control: pretend the rider was last seen `seconds` ago. */
+export const ageRider = (id: string, seconds: number) => { S().seen.set(id, new Date(Date.now() - seconds * 1000).toISOString()); };
+export const setTestLocationPosition = (id: string, latitude: number, longitude: number, status: Loc["status"] = "selected") => {
+  const l = S().locs.find((x) => x.id === id)!; Object.assign(l, { latitude, longitude, status, verified: status === "verified", source: status === "placeholder" ? null : "map" });
+};
 const nameOf = (id: string) =>
   id === TEST_USERS.student.id ? TEST_USERS.student.name : S().riders.get(id)?.name ?? "Test User";
 
@@ -82,7 +94,7 @@ class MemoryRepo implements Repo {
       riderId: null, riderName: null, vehicleReg: null,
       pickup: { ...n.pickup, label: pick ? pick.name : "GPS pin" },
       destination: { id: dest.id, name: dest.name },
-      fareKobo: n.fareKobo, currency: "NGN", passengerCount: n.passengerCount, paymentMethod: n.paymentMethod, paymentStatus: "outstanding",
+      fareKobo: n.fareKobo, farePerPassengerKobo: n.farePerPassengerKobo, currency: "NGN", passengerCount: n.passengerCount, paymentMethod: n.paymentMethod, paymentStatus: "outstanding",
       status: "searching", requestedAt: new Date().toISOString(), cancellationReason: null, _k: n.idempotencyKey,
     };
     S().rides.unshift(ride); return clone(ride);
@@ -118,26 +130,28 @@ class MemoryRepo implements Repo {
   async markCashCollected(rideId: string) {
     const r = S().rides.find((x) => x.id === rideId)!; r.paymentStatus = "collected"; return clone(r);
   }
-  async getRider(id: string) { const r = S().riders.get(id); return r ? clone(r) : null; }
-  async applyRider(actorId: string, reg?: string) {
+  async getRider(id: string) { const r = S().riders.get(id); return r ? view(r) : null; }
+  async applyRider(actorId: string, v: { registration?: string; seatCapacity: number }) {
     const existing = S().riders.get(actorId);
-    if (existing) return clone(existing);
+    if (existing) return view(existing);
     const info: RiderInfo = { userId: actorId, name: nameOf(actorId), approval: "pending", online: false,
-      vehicle: { registration: reg ?? null, approval: "pending", capacity: 3, capacityVerified: false } };
-    S().riders.set(actorId, info); return clone(info);
+      vehicle: { registration: v.registration ?? null, approval: "pending", capacity: v.seatCapacity, capacityVerified: true } };
+    S().riders.set(actorId, info); return view(info);
   }
-  async setOnline(id: string, online: boolean) { const r = S().riders.get(id); if (r) r.online = online; }
-  async listRiders() { return clone([...S().riders.values()]); }
+  async setOnline(id: string, online: boolean) { const r = S().riders.get(id); if (r) { r.online = online; S().seen.set(id, new Date().toISOString()); } }
+  async touchRider(id: string) { if (S().riders.has(id)) S().seen.set(id, new Date().toISOString()); }
+  async maxDeclaredCapacity() { return Math.max(0, ...[...S().riders.values()].filter((r) => r.vehicle?.approval === "approved" && r.vehicle.capacityVerified).map((r) => r.vehicle!.capacity)); }
+  async listRiders() { return [...S().riders.values()].map(view); }
   async setVehicleCapacity(riderId: string, capacity: number) {
     const r = S().riders.get(riderId); if (!r?.vehicle) throw new ApiError(404, "NOT_FOUND", "Rider not found.");
-    r.vehicle.capacity = capacity; r.vehicle.capacityVerified = true; return clone(r);
+    r.vehicle.capacity = capacity; r.vehicle.capacityVerified = true; return view(r);
   }
   async setRiderApproval(id: string, status: RiderApproval) {
     const r = S().riders.get(id);
     if (!r) throw new ApiError(404, "NOT_FOUND", "Rider not found.");
     r.approval = status; if (status !== "approved") r.online = false;
     if (r.vehicle) r.vehicle.approval = status === "approved" ? "approved" : status === "pending" ? "pending" : "rejected";
-    return clone(r);
+    return view(r);
   }
 }
 let inst: MemoryRepo | undefined;

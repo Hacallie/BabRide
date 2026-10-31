@@ -1,10 +1,12 @@
 // Business logic. Reuses fare.ts and ride-state.ts; never trusts client-supplied fare/role/status.
-import { quoteBetweenLandmarks, quoteFare } from "@/lib/fare";
+import { FARE_PER_PASSENGER_KOBO, quoteBetweenLandmarks, quoteFare, totalFareKobo } from "@/lib/fare";
 import type { QuoteResult } from "@/lib/fare";
 import { canTransition } from "@/lib/ride-state";
 import type { RideStatus } from "@/lib/ride-state";
 import { ApiError } from "@/lib/errors";
-import { maxPassengers, searchTimeoutMinutes, serviceAreaMode } from "@/lib/config";
+import { maxPassengers, maxVehicleSeats, nearestMaxMeters, searchTimeoutMinutes, serviceAreaMode } from "@/lib/config";
+import { isLocated, nearestLandmark, onCampus, parseBounds, searchLandmarks } from "@/lib/landmark-geo";
+import type { NearestResult } from "@/lib/landmark-geo";
 import type { Repo } from "@/lib/repo";
 import type { AddLocationInput, SetLocationPositionInput, UpdateLocationDetailsInput } from "@/lib/schemas";
 import type { Actor, Loc, Ride, Role, RiderApproval, RiderInfo } from "@/lib/types";
@@ -30,19 +32,30 @@ async function resolveDestination(repo: Repo, id: string): Promise<Loc> {
   return d;
 }
 
-/** A landmark that was created by name only: it has no real map position (stored as the 0,0 placeholder). */
-const isUnlocated = (l: Loc) => l.status === "placeholder" && l.latitude === 0 && l.longitude === 0;
+/** Unlocated = no real coordinates. Decided ONLY by the coordinates themselves (never by a side flag), so a landmark an
+ *  administrator has positioned can never be reported as "not located". */
+const isUnlocated = (l: Loc) => !isLocated(l);
+// Ordinary users never see configuration jargon. Administrators see the same landmark flagged "Needs location" in Admin.
 const notLocated = (l: Loc) => new ApiError(422, "LANDMARK_NOT_LOCATED",
-  `${l.name} doesn't have a map position yet, so this trip can't be priced. An administrator needs to set its location.`);
+  `${l.name} can't be booked right now. Please choose another stop, or try again later.`);
+
+export function assertPassengers(passengers: number): number {
+  const max = maxPassengers();
+  if (!Number.isInteger(passengers) || passengers < 1 || passengers > max)
+    throw new ApiError(422, "BAD_PASSENGERS", `You can book for 1 to ${max} passengers.`);
+  return passengers;
+}
 
 export interface QuoteView {
-  fareKobo: number; currency: string;
+  /** TOTAL for the whole booking: farePerPassengerKobo x passengerCount. */
+  fareKobo: number; farePerPassengerKobo: number; passengerCount: number; currency: string;
   pickup: { latitude: number | null; longitude: number | null; locationId: string | null; label: string };
   destination: { id: string; name: string };
 }
 
-/** The fare is always the fixed 20000 kobo; this only decides whether the trip is ELIGIBLE. Distance never matters. */
-export async function quote(repo: Repo, pickup: PickupInput, destinationId: string): Promise<QuoteView> {
+/** Fare = ₦200 x passengers, computed here. Distance never matters; this also decides whether the trip is ELIGIBLE. */
+export async function quote(repo: Repo, pickup: PickupInput, destinationId: string, passengerCount = 1): Promise<QuoteView> {
+  const passengers = assertPassengers(passengerCount);
   const dest = await resolveDestination(repo, destinationId);
   const boundary = await repo.getBoundary();
   let result: QuoteResult; let view: QuoteView["pickup"];
@@ -69,7 +82,8 @@ export async function quote(repo: Repo, pickup: PickupInput, destinationId: stri
       throw new ApiError(422, "BOUNDARY_NOT_CONFIGURED", "Using your location isn't available yet. Please choose a pickup landmark instead.");
   }
   if (!result.ok) throw new ApiError(422, result.code, result.message);
-  return { fareKobo: result.fareKobo, currency: result.currency, pickup: view, destination: { id: dest.id, name: dest.name } };
+  return { fareKobo: totalFareKobo(passengers), farePerPassengerKobo: FARE_PER_PASSENGER_KOBO, passengerCount: passengers,
+    currency: result.currency, pickup: view, destination: { id: dest.id, name: dest.name } };
 }
 
 export async function createRide(repo: Repo, actor: Actor | null, input: CreateRideInput): Promise<Ride> {
@@ -79,16 +93,19 @@ export async function createRide(repo: Repo, actor: Actor | null, input: CreateR
   if (input.paymentMethod === "electronic")
     throw new ApiError(501, "PAYMENTS_NOT_ENABLED", "Electronic payment is not enabled yet. Please choose cash.");
   if (await repo.activeRideFor(a.id)) throw new ApiError(409, "ACTIVE_RIDE", "You already have an active ride.");
-  const passengers = input.passengerCount ?? 1;
-  const max = maxPassengers();
-  if (!Number.isInteger(passengers) || passengers < 1 || passengers > max)
-    throw new ApiError(422, "BAD_PASSENGERS", `You can book for 1 to ${max} passengers.`);
-  const q = await quote(repo, input.pickup, input.destinationLocationId);
+  const passengers = assertPassengers(input.passengerCount ?? 1);
+  // Reject BEFORE the ride exists (so before any payment): is there any approved tricycle that can seat this group?
+  const biggest = await repo.maxDeclaredCapacity();
+  if (passengers > 1 && biggest < passengers)
+    throw new ApiError(409, "OVER_CAPACITY", biggest === 0
+      ? `No registered tricycle has confirmed seats for ${passengers} passengers yet. Try fewer passengers, or book more than one ride.`
+      : `The largest tricycle on campus seats ${biggest} passengers, so ${passengers} can't ride together. Book ${biggest} or fewer, or book more than one ride.`);
+  const q = await quote(repo, input.pickup, input.destinationLocationId, passengers); // server-computed fare; any client fare was already dropped
   return repo.createRide({
     studentId: a.id, idempotencyKey: input.idempotencyKey,
     pickup: { latitude: q.pickup.latitude, longitude: q.pickup.longitude, locationId: q.pickup.locationId },
-    passengerCount: passengers, // the fare is per ride: q.fareKobo does not depend on the group size
-    destinationLocationId: q.destination.id, paymentMethod: input.paymentMethod, fareKobo: q.fareKobo,
+    passengerCount: passengers, destinationLocationId: q.destination.id, paymentMethod: input.paymentMethod,
+    fareKobo: q.fareKobo, farePerPassengerKobo: q.farePerPassengerKobo,
   });
 }
 
@@ -125,12 +142,13 @@ async function approvedOnlineRider(repo: Repo, id: string): Promise<RiderInfo> {
   return info;
 }
 
-/** A single passenger fits any approved vehicle. A group needs an administrator-confirmed seat capacity that is big enough. */
+/** The seat rule, applied when a rider accepts. One passenger fits any approved vehicle. More than one needs a capacity the rider
+ *  declared (or an admin set) that is large enough: no keke is silently assumed to seat any particular number. */
 export function assertCapacity(info: RiderInfo, passengers: number): void {
   if (passengers <= 1) return;
   const v = info.vehicle;
   if (!v?.capacityVerified)
-    throw new ApiError(409, "CAPACITY_UNVERIFIED", `This ride has ${passengers} passengers, and an administrator hasn't confirmed your vehicle's seat capacity yet.`);
+    throw new ApiError(409, "CAPACITY_UNVERIFIED", `This ride has ${passengers} passengers, and your vehicle's seat capacity hasn't been recorded yet. Ask an administrator to set it.`);
   if (v.capacity < passengers)
     throw new ApiError(409, "OVER_CAPACITY", `This ride needs ${passengers} seats but your vehicle seats ${v.capacity}.`);
 }
@@ -176,24 +194,58 @@ export async function rideAction(repo: Repo, actor: Actor | null, rideId: string
   return repo.transition(rideId, step.from, step.to, a.id);
 }
 
-export async function riderApply(repo: Repo, actor: Actor | null, vehicleRegistration?: string) {
+export async function riderApply(repo: Repo, actor: Actor | null, input: { vehicleRegistration?: string; seatCapacity: number }) {
   const a = requireRole(actor, "student", "rider"); // admins cannot apply; the role is never taken from the request
-  return repo.applyRider(a.id, vehicleRegistration); // registration is optional; always created as 'pending'
+  const max = maxVehicleSeats();
+  if (!Number.isInteger(input.seatCapacity) || input.seatCapacity < 1 || input.seatCapacity > max)
+    throw new ApiError(422, "BAD_CAPACITY", `Enter a whole number of passenger seats from 1 to ${max} (do not count the driver).`);
+  return repo.applyRider(a.id, { registration: input.vehicleRegistration, seatCapacity: input.seatCapacity }); // always created as 'pending'
 }
+
+export type NotAvailableReason = "NOT_APPROVED" | "SUSPENDED" | "PROFILE_INCOMPLETE" | "VEHICLE_NOT_APPROVED";
+/** Why a rider may NOT be made available (null = eligible). Mirrors accept_ride_for in the database. */
+export function riderIneligibility(info: RiderInfo | null): NotAvailableReason | null {
+  if (!info) return "PROFILE_INCOMPLETE";
+  if (info.approval === "suspended") return "SUSPENDED";
+  if (info.approval !== "approved") return "NOT_APPROVED";
+  if (!info.vehicle || !Number.isInteger(info.vehicle.capacity) || info.vehicle.capacity < 1) return "PROFILE_INCOMPLETE";
+  if (info.vehicle.approval !== "approved") return "VEHICLE_NOT_APPROVED";
+  return null;
+}
+const REASON_TEXT: Record<NotAvailableReason, string> = {
+  NOT_APPROVED: "Your rider account is not approved yet.", SUSPENDED: "Your rider account is suspended.",
+  PROFILE_INCOMPLETE: "Your rider profile is incomplete (vehicle or seat capacity missing).", VEHICLE_NOT_APPROVED: "Your vehicle is not approved yet.",
+};
 
 export async function riderSetOnline(repo: Repo, actor: Actor | null, online: boolean) {
   const a = requireRole(actor, "rider");
   if (online) {
-    const info = await repo.getRider(a.id);
-    if (!info || info.approval !== "approved" || info.vehicle?.approval !== "approved")
-      throw new ApiError(403, "RIDER_NOT_APPROVED", "Your rider account is not approved yet.");
+    const why = riderIneligibility(await repo.getRider(a.id));
+    if (why) throw new ApiError(why === "PROFILE_INCOMPLETE" ? 409 : 403, why === "PROFILE_INCOMPLETE" ? why : "RIDER_NOT_APPROVED", REASON_TEXT[why]);
   }
   await repo.setOnline(a.id, online);
+}
+
+/** Called by the client right after a successful sign-in. Customers and admins are refused (403); an ineligible rider is NOT an
+ *  error (sign-in must still work): the answer says online:false and why. Safe to repeat (two devices, retries). */
+export async function riderStartSession(repo: Repo, actor: Actor | null): Promise<{ online: boolean; reason: NotAvailableReason | null }> {
+  const a = requireRole(actor, "rider");
+  const why = riderIneligibility(await repo.getRider(a.id));
+  if (why) return { online: false, reason: why };
+  await repo.setOnline(a.id, true);
+  return { online: true, reason: null };
+}
+/** Called on sign-out. Always allowed for the rider; harmless if already offline. */
+export async function riderEndSession(repo: Repo, actor: Actor | null): Promise<{ online: false }> {
+  const a = requireRole(actor, "rider");
+  await repo.setOnline(a.id, false);
+  return { online: false };
 }
 
 /** Riders only see pickup/destination/fare of unassigned rides, never student identity. */
 export async function riderRequests(repo: Repo, actor: Actor | null) {
   const a = requireRole(actor, "rider");
+  await repo.touchRider(a.id); // heartbeat: keeps an online rider "fresh"; a closed tab or expired session stops refreshing it
   const info = await repo.getRider(a.id);
   const mine = await repo.listRiderRides(a.id, 20);
   const active = mine.find((r) => RIDER_BUSY.includes(r.status) ) ?? null;
@@ -236,8 +288,15 @@ async function findLocation(repo: Repo, id: string): Promise<Loc> {
 }
 
 /** New landmarks are always "selected", never ground verified, whatever the client sends. */
+/** A landmark can only sit on campus. Uses the saved campus polygon, else the owner's rectangle (GEOCODER_VIEWBOX); if neither exists it cannot be checked. */
+async function assertOnCampus(repo: Repo, p: { latitude: number; longitude: number }): Promise<void> {
+  if (onCampus(p, await repo.getBoundary(), parseBounds(process.env.GEOCODER_VIEWBOX)) === false)
+    throw new ApiError(422, "OUTSIDE_CAMPUS", "That point is outside the Babcock campus area. Choose a spot on campus.");
+}
+
 export async function adminAddLocation(repo: Repo, actor: Actor | null, input: AddLocationInput): Promise<Loc> {
   const a = requireRole(actor, "admin");
+  if (input.latitude !== undefined && input.longitude !== undefined) await assertOnCampus(repo, { latitude: input.latitude, longitude: input.longitude });
   return repo.addLocation({ name: input.name, description: input.description, latitude: input.latitude, longitude: input.longitude,
     source: input.source, pickupAllowed: input.pickupAllowed, destinationAllowed: input.destinationAllowed }, a.id);
 }
@@ -245,6 +304,7 @@ export async function adminAddLocation(repo: Repo, actor: Actor | null, input: A
 export async function adminSetLocationPosition(repo: Repo, actor: Actor | null, id: string, input: SetLocationPositionInput): Promise<Loc> {
   const a = requireRole(actor, "admin");
   const cur = await findLocation(repo, id);
+  await assertOnCampus(repo, input);
   if (cur.status === "verified" && !input.confirmReplaceVerified)
     throw new ApiError(409, "VERIFIED_LOCATION", "This landmark is ground verified. Moving it removes that verification. Confirm to continue.");
   return repo.setLocationPosition(id, { latitude: input.latitude, longitude: input.longitude, source: input.source }, a.id);
@@ -267,8 +327,25 @@ export async function adminUpdateLocationDetails(repo: Repo, actor: Actor | null
 
 export async function adminSetVehicleCapacity(repo: Repo, actor: Actor | null, riderId: string, capacity: number) {
   const a = requireRole(actor, "admin");
-  if (!Number.isInteger(capacity) || capacity < 1 || capacity > 8) throw new ApiError(422, "BAD_CAPACITY", "Seats must be a whole number from 1 to 8.");
+  const max = maxVehicleSeats();
+  if (!Number.isInteger(capacity) || capacity < 1 || capacity > max) throw new ApiError(422, "BAD_CAPACITY", `Seats must be a whole number from 1 to ${max}.`);
   const info = await repo.getRider(riderId);
   if (!info?.vehicle) throw new ApiError(404, "NOT_FOUND", "That rider has no vehicle on file.");
   return repo.setVehicleCapacity(riderId, capacity, a.id);
+}
+
+
+// ---- Public campus helpers (no sign-in needed: they expose only landmark names/positions, never users or rides) ----
+export async function nearestCampusLandmark(repo: Repo, point: { latitude: number; longitude: number }): Promise<NearestResult & { maxMeters: number }> {
+  const maxMeters = nearestMaxMeters();
+  const r = nearestLandmark(point, await repo.listLocations(), { maxMeters, boundary: await repo.getBoundary(), bounds: parseBounds(process.env.GEOCODER_VIEWBOX) });
+  return { ...r, maxMeters };
+}
+export async function searchCampusLandmarks(repo: Repo, q: string, purpose?: "pickup" | "destination") {
+  return searchLandmarks(await repo.listLocations(), q, purpose);
+}
+/** Administrators' correction worklist: active landmarks that still have no real position. */
+export async function adminLandmarksNeedingLocation(repo: Repo, actor: Actor | null): Promise<Loc[]> {
+  requireRole(actor, "admin");
+  return (await repo.listLocations()).filter((l) => !isLocated(l));
 }
