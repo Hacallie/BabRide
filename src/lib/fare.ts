@@ -75,3 +75,13 @@ export function quoteBetweenLandmarks(pickupId: string, destinationId: string, c
   if (fare !== FIXED_FARE_KOBO) throw new Error("Institution fare differs from the validated fixed fare");
   return { ok: true, fareKobo: fare, currency: CURRENCY };
 }
+
+/**
+ * The fare is PER PASSENGER: total = 20000 kobo x passengers. Distance, time and demand never change it.
+ * Whole numbers only, so a stray 2.5 or 0 can never become a price.
+ */
+export function totalFareKobo(passengers: number, perPassengerKobo: number = FIXED_FARE_KOBO): number {
+  if (!Number.isInteger(passengers) || passengers < 1) throw new Error("passengers must be a positive whole number");
+  if (perPassengerKobo !== FIXED_FARE_KOBO) throw new Error("Institution fare differs from the validated fixed fare");
+  return perPassengerKobo * passengers;
+}

@@ -11,7 +11,7 @@ export default function Signup() {
       <AuthPanel
         initialView="signup"
         switchHrefs={{ signin: "/login", signup: "/signup" }}
-        intro="One account to book rides. Administrators approve riders; nobody can make themselves a rider or admin."
+        intro="Create an account to book rides, or register as a rider. Nobody can make themselves an administrator."
         footer={<p>Want to give rides? <Link href="/rider/join" className="font-semibold text-white underline underline-offset-2">Join as a rider</Link></p>}
       />
     </div>

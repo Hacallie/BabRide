@@ -39,9 +39,9 @@ function Dashboard() {
   useEffect(() => { if (feed?.rider) window.dispatchEvent(new CustomEvent(RIDER_STATUS_EVENT, { detail: feed.rider.online })); }, [feed?.rider?.online]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!feed) return <p className="p-8 text-center" role="status">{err ?? "Loading…"}</p>;
   const info = feed.rider;
-  if (!info || info.approval !== "approved") {
-    return <div className={`${card} my-6`}><h1 className="text-2xl font-bold">Rider status: {info?.approval ?? "not applied"}</h1>
-      <p className="mt-2 text-navy-800">{info?.approval === "pending" ? "Your application is waiting for administrator approval. You'll be able to go online once approved." : "Your rider account cannot accept rides."}</p></div>;
+  if (!info) {
+    return <div className={`${card} my-6`}><h1 className="text-2xl font-bold">Rider account unavailable</h1>
+      <p className="mt-2 text-navy-800">We could not find your rider account.</p></div>;
   }
   const a = feed.active;
   return (

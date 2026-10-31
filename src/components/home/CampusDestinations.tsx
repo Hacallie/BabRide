@@ -6,7 +6,7 @@ import { SELECT_DESTINATION_EVENT, type Landmark } from "./types";
 export default function CampusDestinations() {
   const [lms, setLms] = useState<Landmark[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  useEffect(() => { api<{ landmarks: Landmark[] }>("/api/v1/campus/landmarks").then((r) => setLms(r.landmarks.filter((l) => l.destinationAllowed))).catch((e: Error) => setErr(e.message)); }, []);
+  useEffect(() => { api<{ landmarks: Landmark[] }>("/api/v1/campus/landmarks").then((r) => setLms(r.landmarks.filter((l) => l.destinationAllowed && l.name !== "Winslow Hall"))).catch((e: Error) => setErr(e.message)); }, []);
 
   function choose(id: string) {
     window.dispatchEvent(new CustomEvent(SELECT_DESTINATION_EVENT, { detail: id }));
